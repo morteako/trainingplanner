@@ -41,11 +41,31 @@
   margin: 0 0 12px;
 }
 
-.subhead {
-  margin: 0;
+.week-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.week-number {
+  margin: 0 0 12px;
   color: var(--muted);
-  font-size: 1rem;
-  max-width: 520px;
+  font-size: 0.95rem;
+}
+
+.week-button {
+  border-radius: 999px;
+  border: 1px solid rgba(31, 26, 22, 0.2);
+  background: rgba(255, 255, 255, 0.7);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.week-button:focus-visible {
+  outline: 2px solid rgba(31, 26, 22, 0.35);
+  outline-offset: 2px;
 }
 
 .sheet {
@@ -106,6 +126,9 @@
   position: sticky;
   top: 0;
   z-index: 2;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
 }
 
 .row-label {
@@ -185,6 +208,12 @@
   stroke-width: 1.8;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.date {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted);
 }
 
 .summary-label,

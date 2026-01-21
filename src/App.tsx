@@ -12,6 +12,41 @@ const days = [
   'Søndag',
 ]
 
+const weekDayIndex: Record<string, number> = {
+  Mandag: 0,
+  Tirsdag: 1,
+  Onsdag: 2,
+  Torsdag: 3,
+  Fredag: 4,
+  Lørdag: 5,
+  Søndag: 6,
+}
+
+const addDays = (date: Date, daysToAdd: number) => {
+  const next = new Date(date)
+  next.setDate(next.getDate() + daysToAdd)
+  return next
+}
+
+const formatDate = (date: Date) =>
+  new Intl.DateTimeFormat('nb-NO', {
+    day: 'numeric',
+    month: 'numeric',
+  }).format(date)
+
+const getIsoWeekNumber = (date: Date) => {
+  const target = new Date(date)
+  const dayIndex = (target.getDay() + 6) % 7
+  target.setDate(target.getDate() - dayIndex + 3)
+  const firstThursday = new Date(target.getFullYear(), 0, 4)
+  const firstDayIndex = (firstThursday.getDay() + 6) % 7
+  firstThursday.setDate(firstThursday.getDate() - firstDayIndex + 3)
+  const weekNumber = Math.round(
+    (target.getTime() - firstThursday.getTime()) / (7 * 24 * 60 * 60 * 1000) + 1
+  )
+  return weekNumber
+}
+
 type Tone =
   | 'work-strong'
   | 'work-soft'
@@ -122,11 +157,20 @@ function App() {
     rowIndex: number
     day: string
   } | null>(null)
+  const [weekOffset, setWeekOffset] = useState(0)
   const [draft, setDraft] = useState<{
     text: string
     minutes: number
     distance: number
   } | null>(null)
+
+  const anchorWednesday = new Date(new Date().getFullYear(), 0, 21)
+  const baseWeekStart = addDays(anchorWednesday, -weekDayIndex.Onsdag)
+  const currentWeekStart = addDays(baseWeekStart, weekOffset * 7)
+  const weekDates = days.map((day) =>
+    formatDate(addDays(currentWeekStart, weekDayIndex[day]))
+  )
+  const weekNumber = getIsoWeekNumber(currentWeekStart)
 
   const updateCellText = (rowIndex: number, day: string, text: string) => {
     setRows((prev) =>
@@ -218,6 +262,23 @@ function App() {
       <header className="page-header">
         <p className="eyebrow">Ukeplan</p>
         <h1>Treningsplan og avtaler</h1>
+        <p className="week-number">Uke {weekNumber}</p>
+        <div className="week-controls">
+          <button
+            type="button"
+            className="week-button"
+            onClick={() => setWeekOffset((prev) => prev - 1)}
+          >
+            Forrige uke
+          </button>
+          <button
+            type="button"
+            className="week-button"
+            onClick={() => setWeekOffset((prev) => prev + 1)}
+          >
+            Neste uke
+          </button>
+        </div>
       </header>
 
       <section className="sheet">
@@ -230,7 +291,8 @@ function App() {
                 className="cell header"
                 style={delayStyle(index + 1)}
               >
-                {day}
+                <span>{day}</span>
+                <span className="date">{weekDates[index]}</span>
               </div>
             ))}
             {rows.map((row, rowIndex) => (
