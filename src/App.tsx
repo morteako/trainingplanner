@@ -1,6 +1,8 @@
-import type { CSSProperties } from 'react'
-import { useState } from 'react'
+import type { CSSProperties, FormEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './App.css'
+import { supabase } from './supabaseClient'
+import type { Session } from '@supabase/supabase-js'
 
 const days = [
   'Mandag',
@@ -69,6 +71,16 @@ type Row = {
   cells: Record<string, Cell>
 }
 
+const rowToneMap: Record<string, Tone> = {
+  Jobb: 'work-strong',
+  Ting: 'event',
+  Rulle: 'roller',
+  Løping: 'run',
+  Skøyter: 'skate',
+  Styrke: 'strength',
+  Annet: 'neutral',
+}
+
 const baseRows: Array<Omit<Row, 'cells'> & { cells: Record<string, Cell> }> = [
   {
     label: 'Jobb',
@@ -103,7 +115,6 @@ const baseRows: Array<Omit<Row, 'cells'> & { cells: Record<string, Cell> }> = [
     cells: {
       Mandag: { text: '5km løp', tone: 'run', minutes: 0, distance: 0 },
       Onsdag: { text: 'Løp til jobb', tone: 'run', minutes: 0, distance: 0 },
-      Torsdag: { text: 'Styrke?', tone: 'strength', minutes: 0, distance: 0 },
       Lørdag: { text: 'Løping?', tone: 'run', minutes: 0, distance: 0 },
     },
   },
@@ -119,6 +130,7 @@ const baseRows: Array<Omit<Row, 'cells'> & { cells: Record<string, Cell> }> = [
     label: 'Styrke',
     cells: {
       Mandag: { text: 'Styrke', tone: 'strength', minutes: 0, distance: 0 },
+      Torsdag: { text: 'Styrke?', tone: 'strength', minutes: 0, distance: 0 },
     },
   },
   {
@@ -137,7 +149,7 @@ const buildInitialRows = (): Row[] =>
           day,
           {
             text: cell?.text ?? '',
-            tone: cell?.tone ?? 'neutral',
+            tone: cell?.tone ?? (rowToneMap[row.label] ?? 'neutral'),
             minutes: cell?.minutes ?? 0,
             distance: cell?.distance ?? 0,
           },
@@ -145,6 +157,54 @@ const buildInitialRows = (): Row[] =>
       })
     ),
   }))
+
+type PlanPayload = {
+  rows: Array<{
+    label: string
+    cells: Record<string, { text: string; minutes: number; distance: number }>
+  }>
+}
+
+const serializePlan = (rows: Row[]): PlanPayload => ({
+  rows: rows.map((row) => ({
+    label: row.label,
+    cells: Object.fromEntries(
+      days.map((day) => {
+        const cell = row.cells[day]
+        return [
+          day,
+          {
+            text: cell.text,
+            minutes: cell.minutes,
+            distance: cell.distance,
+          },
+        ]
+      })
+    ),
+  })),
+})
+
+const hydrateRows = (payload: PlanPayload | null | undefined): Row[] => {
+  if (!payload?.rows?.length) return buildInitialRows()
+
+  return payload.rows.map((row) => ({
+    label: row.label,
+    cells: Object.fromEntries(
+      days.map((day) => {
+        const cell = row.cells?.[day]
+        return [
+          day,
+          {
+            text: cell?.text ?? '',
+            minutes: cell?.minutes ?? 0,
+            distance: cell?.distance ?? 0,
+            tone: rowToneMap[row.label] ?? 'neutral',
+          },
+        ]
+      })
+    ),
+  }))
+}
 
 function App() {
   const delayStyle = (value: number): CSSProperties =>
@@ -158,11 +218,27 @@ function App() {
     day: string
   } | null>(null)
   const [weekOffset, setWeekOffset] = useState(0)
+  const [dragging, setDragging] = useState<{
+    rowIndex: number
+    day: string
+  } | null>(null)
+  const [dragOver, setDragOver] = useState<{
+    rowIndex: number
+    day: string
+  } | null>(null)
   const [draft, setDraft] = useState<{
     text: string
     minutes: number
     distance: number
   } | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [authNotice, setAuthNotice] = useState<string | null>(null)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [planLoading, setPlanLoading] = useState(false)
+  const saveTimer = useRef<number | null>(null)
 
   const anchorWednesday = new Date(new Date().getFullYear(), 0, 21)
   const baseWeekStart = addDays(anchorWednesday, -weekDayIndex.Onsdag)
@@ -171,6 +247,8 @@ function App() {
     formatDate(addDays(currentWeekStart, weekDayIndex[day]))
   )
   const weekNumber = getIsoWeekNumber(currentWeekStart)
+  const weekStart = currentWeekStart.toISOString().slice(0, 10)
+  const weekYear = currentWeekStart.getFullYear()
 
   const updateCellText = (rowIndex: number, day: string, text: string) => {
     setRows((prev) =>
@@ -252,16 +330,206 @@ function App() {
     closeModal()
   }
 
+  const moveCell = (
+    from: { rowIndex: number; day: string },
+    to: { rowIndex: number; day: string }
+  ) => {
+    if (from.rowIndex === to.rowIndex && from.day === to.day) return
+    setRows((prev) => {
+      const next = prev.map((row) => ({
+        ...row,
+        cells: { ...row.cells },
+      }))
+      const fromCell = next[from.rowIndex].cells[from.day]
+      const targetTone =
+        rowToneMap[next[to.rowIndex].label] ?? fromCell.tone
+      next[from.rowIndex].cells[from.day] = {
+        text: '',
+        minutes: 0,
+        distance: 0,
+        tone: 'neutral',
+      }
+      next[to.rowIndex].cells[to.day] = {
+        ...fromCell,
+        tone: targetTone,
+      }
+      return next
+    })
+  }
+
   const minutesPerDay = days.map((day) =>
     rows.reduce((sum, row) => sum + row.cells[day].minutes, 0)
   )
   const totalMinutes = minutesPerDay.reduce((sum, value) => sum + value, 0)
 
+  useEffect(() => {
+    const loadSession = async () => {
+      const { data } = await supabase.auth.getSession()
+      setSession(data.session)
+    }
+
+    void loadSession()
+
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        setSession(nextSession)
+      }
+    )
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
+
+  useEffect(() => {
+    const fetchPlan = async () => {
+      if (!session?.user) return
+      setPlanLoading(true)
+      const { data, error } = await supabase
+        .from('plans')
+        .select('data')
+        .eq('user_id', session.user.id)
+        .eq('week_start', weekStart)
+        .maybeSingle()
+      if (!error && data?.data) {
+        setRows(hydrateRows(data.data as PlanPayload))
+      } else if (!error) {
+        setRows(buildInitialRows())
+      }
+      setPlanLoading(false)
+    }
+
+    void fetchPlan()
+  }, [session?.user, weekStart])
+
+  useEffect(() => {
+    if (!session?.user || planLoading) return
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current)
+    }
+
+    saveTimer.current = window.setTimeout(async () => {
+      await supabase.from('plans').upsert(
+        {
+          user_id: session.user.id,
+          week_start: weekStart,
+          week_number: weekNumber,
+          year: weekYear,
+          data: serializePlan(rows),
+        },
+        { onConflict: 'user_id,week_start' }
+      )
+    }, 600)
+
+    return () => {
+      if (saveTimer.current) {
+        window.clearTimeout(saveTimer.current)
+      }
+    }
+  }, [rows, session?.user, planLoading, weekStart, weekNumber, weekYear])
+
+  const handleSignIn = async (event: FormEvent) => {
+    event.preventDefault()
+    setAuthLoading(true)
+    setAuthError(null)
+    setAuthNotice(null)
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+    if (error) {
+      setAuthError(error.message)
+    }
+    setAuthLoading(false)
+  }
+
+  const handleSignUp = async () => {
+    setAuthLoading(true)
+    setAuthError(null)
+    setAuthNotice(null)
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    })
+    if (error) {
+      setAuthError(error.message)
+    } else {
+      setAuthNotice('Sjekk e-posten din og bekreft for å fullføre registrering.')
+    }
+    setAuthLoading(false)
+  }
+
+  const handleSignOut = async () => {
+    setAuthLoading(true)
+    setAuthError(null)
+    setAuthNotice(null)
+    const { error } = await supabase.auth.signOut()
+    if (error) {
+      setAuthError(error.message)
+    }
+    setAuthLoading(false)
+  }
+
   return (
     <div className="page">
       <header className="page-header">
-        <p className="eyebrow">Ukeplan</p>
-        <h1>Treningsplan og avtaler</h1>
+        <div className="top-bar">
+          <div>
+            <p className="eyebrow">Ukeplan</p>
+            <h1>Treningsplan og avtaler</h1>
+          </div>
+          <div className="auth">
+            {session?.user ? (
+              <div className="auth-row">
+                <span className="auth-email">{session.user.email}</span>
+                <button
+                  type="button"
+                  className="auth-button"
+                  onClick={handleSignOut}
+                  disabled={authLoading}
+                >
+                  Logg ut
+                </button>
+              </div>
+            ) : (
+              <form className="auth-form" onSubmit={handleSignIn}>
+                <input
+                  type="email"
+                  placeholder="E-post"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  required
+                />
+                <input
+                  type="password"
+                  placeholder="Passord"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+                <div className="auth-actions">
+                  <button
+                    type="submit"
+                    className="auth-button"
+                    disabled={authLoading}
+                  >
+                    Logg inn
+                  </button>
+                  <button
+                    type="button"
+                    className="auth-button ghost"
+                    onClick={handleSignUp}
+                    disabled={authLoading}
+                  >
+                    Registrer
+                  </button>
+                </div>
+              </form>
+            )}
+            {authError && <p className="auth-error">{authError}</p>}
+            {authNotice && <p className="auth-notice">{authNotice}</p>}
+          </div>
+        </div>
         <p className="week-number">Uke {weekNumber}</p>
         <div className="week-controls">
           <button
@@ -285,16 +553,19 @@ function App() {
         <div className="sheet-scroll" aria-label="Ukeplan">
           <div className="grid">
             <div className="cell corner" aria-hidden="true" />
-            {days.map((day, index) => (
-              <div
-                key={day}
-                className="cell header"
-                style={delayStyle(index + 1)}
-              >
+            {days.map((day, index) => {
+              const isWeekend = day === 'Lørdag' || day === 'Søndag'
+              return (
+                <div
+                  key={day}
+                  className={`cell header${isWeekend ? ' weekend' : ''}`}
+                  style={delayStyle(index + 1)}
+                >
                 <span>{day}</span>
                 <span className="date">{weekDates[index]}</span>
-              </div>
-            ))}
+                </div>
+              )
+            })}
             {rows.map((row, rowIndex) => (
               <div key={row.label} className="row">
                 <div
@@ -306,17 +577,57 @@ function App() {
                 {days.map((day, dayIndex) => {
                   const cell = row.cells[day]
                   const tone = cell.tone
+                  const isWeekend = day === 'Lørdag' || day === 'Søndag'
                   const isEmpty =
                     cell.text.trim() === '' &&
                     cell.minutes === 0 &&
                     cell.distance === 0
+                  const isDragSource =
+                    dragging?.rowIndex === rowIndex && dragging?.day === day
+                  const isDragOver =
+                    dragOver?.rowIndex === rowIndex && dragOver?.day === day
                   return (
                     <div
                       key={`${row.label}-${day}`}
-                      className={`cell slot ${tone}${isEmpty ? ' empty' : ''}`}
+                      className={`cell slot ${tone}${isEmpty ? ' empty' : ''}${
+                        isWeekend ? ' weekend' : ''
+                      }${isDragOver ? ' drop-target' : ''}${
+                        isDragSource ? ' drag-source' : ''
+                      }`}
                       style={delayStyle(
                         (rowIndex + 1) * days.length + dayIndex + 1
                       )}
+                      draggable={!isEmpty}
+                      onDragStart={(event) => {
+                        if (isEmpty) return
+                        event.dataTransfer.setData('text/plain', 'cell')
+                        event.dataTransfer.effectAllowed = 'move'
+                        setDragging({ rowIndex, day })
+                      }}
+                      onDragEnd={() => {
+                        setDragging(null)
+                        setDragOver(null)
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault()
+                        setDragOver({ rowIndex, day })
+                        event.dataTransfer.dropEffect = 'move'
+                      }}
+                      onDragLeave={() => {
+                        setDragOver((prev) =>
+                          prev?.rowIndex === rowIndex && prev?.day === day
+                            ? null
+                            : prev
+                        )
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault()
+                        if (dragging) {
+                          moveCell(dragging, { rowIndex, day })
+                        }
+                        setDragging(null)
+                        setDragOver(null)
+                      }}
                     >
                       {isEmpty ? (
                         <button
@@ -489,6 +800,22 @@ function App() {
                   )
                 }
               />
+              <div className="quick-row">
+                {[5].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className="quick-chip"
+                    onClick={() =>
+                      setDraft((prev) =>
+                        prev ? { ...prev, distance: value } : prev
+                      )
+                    }
+                  >
+                    {value} km
+                  </button>
+                ))}
+              </div>
             </label>
             <div className="modal-actions">
               <button type="button" className="button ghost" onClick={closeModal}>

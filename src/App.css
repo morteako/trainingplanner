@@ -27,6 +27,76 @@
   text-align: left;
 }
 
+.top-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.auth {
+  min-width: min(320px, 100%);
+}
+
+.auth-form {
+  display: grid;
+  gap: 8px;
+}
+
+.auth-form input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 26, 22, 0.2);
+  font: inherit;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.auth-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.auth-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.auth-email {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.auth-button {
+  border-radius: 999px;
+  border: 1px solid rgba(31, 26, 22, 0.2);
+  background: rgba(255, 255, 255, 0.7);
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.auth-button.ghost {
+  background: transparent;
+}
+
+.auth-error {
+  margin: 6px 0 0;
+  color: #a73b2f;
+  font-size: 0.85rem;
+}
+
+.auth-notice {
+  margin: 6px 0 0;
+  color: #6b4b2a;
+  font-size: 0.85rem;
+}
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -113,6 +183,15 @@
   justify-content: center;
 }
 
+.cell.drag-source {
+  opacity: 0.6;
+}
+
+.cell.drop-target {
+  outline: 2px dashed rgba(31, 26, 22, 0.4);
+  outline-offset: -4px;
+}
+
 .corner {
   background: linear-gradient(130deg, #f9efe0 20%, #f6dec2);
   position: sticky;
@@ -129,6 +208,10 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+}
+
+.weekend {
+  background: #f2ddc1;
 }
 
 .row-label {
