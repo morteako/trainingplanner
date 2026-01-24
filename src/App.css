@@ -4,6 +4,7 @@
   --paper: #f7f1e6;
   --sheet: #fef8ed;
   --stroke: #d7c9b6;
+  --stroke-strong: #c8b7a2;
   --shadow: rgba(63, 50, 40, 0.2);
   --accent: #d05f2f;
   --work-strong: #e08a2e;
@@ -222,6 +223,26 @@
   z-index: 1;
 }
 
+.row-label.info {
+  background: #e0d7ca;
+}
+
+.group-divider {
+  border-top: 2px solid var(--stroke-strong);
+}
+
+.row-label-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row-totals {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
 .slot {
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -361,8 +382,9 @@
   background: #fcebd4;
   padding: 6px 12px;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .quick-chip:focus-visible {

@@ -81,6 +81,8 @@ const rowToneMap: Record<string, Tone> = {
   Annet: 'neutral',
 }
 
+const trainingRows = new Set(['Rulle', 'Løping', 'Skøyter', 'Styrke', 'Annet'])
+
 const baseRows: Array<Omit<Row, 'cells'> & { cells: Record<string, Cell> }> = [
   {
     label: 'Jobb',
@@ -325,8 +327,14 @@ function App() {
   const saveModal = () => {
     if (!modalCell || !draft) return
     updateCellText(modalCell.rowIndex, modalCell.day, draft.text)
-    updateCellMinutes(modalCell.rowIndex, modalCell.day, draft.minutes)
-    updateCellDistance(modalCell.rowIndex, modalCell.day, draft.distance)
+    const label = rows[modalCell.rowIndex]?.label
+    if (label && trainingRows.has(label)) {
+      updateCellMinutes(modalCell.rowIndex, modalCell.day, draft.minutes)
+      updateCellDistance(modalCell.rowIndex, modalCell.day, draft.distance)
+    } else {
+      updateCellMinutes(modalCell.rowIndex, modalCell.day, 0)
+      updateCellDistance(modalCell.rowIndex, modalCell.day, 0)
+    }
     closeModal()
   }
 
@@ -341,26 +349,63 @@ function App() {
         cells: { ...row.cells },
       }))
       const fromCell = next[from.rowIndex].cells[from.day]
-      const targetTone =
-        rowToneMap[next[to.rowIndex].label] ?? fromCell.tone
+      const sourceLabel = next[from.rowIndex].label
+      const sourceTone = rowToneMap[sourceLabel] ?? 'neutral'
+      const targetLabel = next[to.rowIndex].label
+      const targetTone = rowToneMap[targetLabel] ?? fromCell.tone
+      const isTrainingTarget = trainingRows.has(targetLabel)
       next[from.rowIndex].cells[from.day] = {
         text: '',
         minutes: 0,
         distance: 0,
-        tone: 'neutral',
+        tone: sourceTone,
       }
       next[to.rowIndex].cells[to.day] = {
         ...fromCell,
         tone: targetTone,
+        minutes: isTrainingTarget ? fromCell.minutes : 0,
+        distance: isTrainingTarget ? fromCell.distance : 0,
       }
       return next
     })
   }
 
   const minutesPerDay = days.map((day) =>
-    rows.reduce((sum, row) => sum + row.cells[day].minutes, 0)
+    rows.reduce(
+      (sum, row) =>
+        sum + (trainingRows.has(row.label) ? row.cells[day].minutes : 0),
+      0
+    )
   )
   const totalMinutes = minutesPerDay.reduce((sum, value) => sum + value, 0)
+  const totalsPerRow = rows.map((row) => {
+    if (!trainingRows.has(row.label)) {
+      return { minutes: 0, distance: 0, count: 0 }
+    }
+
+    const minutes = days.reduce(
+      (sum, day) => sum + row.cells[day].minutes,
+      0
+    )
+    const distance = days.reduce(
+      (sum, day) => sum + row.cells[day].distance,
+      0
+    )
+    const count = days.reduce((sum, day) => {
+      const cell = row.cells[day]
+      const isEmpty =
+        cell.text.trim() === '' && cell.minutes === 0 && cell.distance === 0
+      return sum + (isEmpty ? 0 : 1)
+    }, 0)
+    return { minutes, distance, count }
+  })
+  const modalRowLabel = modalCell ? rows[modalCell.rowIndex]?.label : null
+  const isModalTraining = modalRowLabel
+    ? trainingRows.has(modalRowLabel)
+    : false
+  const trainingStartIndex = rows.findIndex((row) =>
+    trainingRows.has(row.label)
+  )
 
   useEffect(() => {
     const loadSession = async () => {
@@ -566,13 +611,45 @@ function App() {
                 </div>
               )
             })}
-            {rows.map((row, rowIndex) => (
+            {rows.map((row, rowIndex) => {
+              const isTrainingRow = trainingRows.has(row.label)
+              const isTrainingStart = rowIndex === trainingStartIndex
+              return (
               <div key={row.label} className="row">
                 <div
-                  className="cell row-label"
+                  className={`cell row-label${isTrainingRow ? '' : ' info'}${
+                    isTrainingStart ? ' group-divider' : ''
+                  }`}
                   style={delayStyle(days.length + rowIndex + 1)}
                 >
-                  {row.label}
+                  <div className="row-label-content">
+                    <span>{row.label}</span>
+                    {trainingRows.has(row.label) &&
+                      (totalsPerRow[rowIndex].minutes > 0 ||
+                        totalsPerRow[rowIndex].distance > 0 ||
+                        totalsPerRow[rowIndex].count > 0) && (
+                        <span className="row-totals">
+                          {totalsPerRow[rowIndex].count > 0
+                            ? `${totalsPerRow[rowIndex].count} økt`
+                            : ''}
+                          {totalsPerRow[rowIndex].count > 0 &&
+                          (totalsPerRow[rowIndex].minutes > 0 ||
+                            totalsPerRow[rowIndex].distance > 0)
+                            ? ' • '
+                            : ''}
+                          {totalsPerRow[rowIndex].minutes > 0
+                            ? `${totalsPerRow[rowIndex].minutes} min`
+                            : ''}
+                          {totalsPerRow[rowIndex].minutes > 0 &&
+                          totalsPerRow[rowIndex].distance > 0
+                            ? ' • '
+                            : ''}
+                          {totalsPerRow[rowIndex].distance > 0
+                            ? `${totalsPerRow[rowIndex].distance} km`
+                            : ''}
+                        </span>
+                      )}
+                  </div>
                 </div>
                 {days.map((day, dayIndex) => {
                   const cell = row.cells[day]
@@ -593,7 +670,7 @@ function App() {
                         isWeekend ? ' weekend' : ''
                       }${isDragOver ? ' drop-target' : ''}${
                         isDragSource ? ' drag-source' : ''
-                      }`}
+                      }${isTrainingStart ? ' group-divider' : ''}`}
                       style={delayStyle(
                         (rowIndex + 1) * days.length + dayIndex + 1
                       )}
@@ -665,17 +742,20 @@ function App() {
                                 <path d="M14 6l4 4" />
                               </svg>
                             </button>
-                            {(cell.minutes > 0 || cell.distance > 0) && (
-                              <span>
-                                {cell.minutes > 0 ? `${cell.minutes} min` : ''}
-                                {cell.minutes > 0 && cell.distance > 0
-                                  ? ' • '
-                                  : ''}
-                                {cell.distance > 0
-                                  ? `${cell.distance} km`
-                                  : ''}
-                              </span>
-                            )}
+                            {isTrainingRow &&
+                              (cell.minutes > 0 || cell.distance > 0) && (
+                                <span>
+                                  {cell.minutes > 0
+                                    ? `${cell.minutes} min`
+                                    : ''}
+                                  {cell.minutes > 0 && cell.distance > 0
+                                    ? ' • '
+                                    : ''}
+                                  {cell.distance > 0
+                                    ? `${cell.distance} km`
+                                    : ''}
+                                </span>
+                              )}
                           </div>
                         </>
                       )}
@@ -683,7 +763,8 @@ function App() {
                   )
                 })}
               </div>
-            ))}
+            )
+            })}
             <div className="row">
               <div
                 className="cell row-label summary-label"
@@ -748,75 +829,79 @@ function App() {
                 }
               />
             </label>
-            <label className="modal-field">
-              <span>Tid (minutter)</span>
-              <input
-                type="number"
-                min={0}
-                value={draft.minutes}
-                onChange={(event) =>
-                  setDraft((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          minutes: Math.max(0, Number(event.target.value || 0)),
-                        }
-                      : prev
-                  )
-                }
-              />
-              <div className="quick-row">
-                {[30, 45, 60].map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className="quick-chip"
-                    onClick={() =>
+            {isModalTraining && (
+              <>
+                <label className="modal-field">
+                  <span>Tid (minutter)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={draft.minutes}
+                    onChange={(event) =>
                       setDraft((prev) =>
-                        prev ? { ...prev, minutes: value } : prev
+                        prev
+                          ? {
+                              ...prev,
+                              minutes: Math.max(
+                                0,
+                                Number(event.target.value || 0)
+                              ),
+                            }
+                          : prev
                       )
                     }
-                  >
-                    {value} min
-                  </button>
-                ))}
-              </div>
-            </label>
-            <label className="modal-field">
-              <span>Distanse (km)</span>
-              <input
-                type="number"
-                min={0}
-                step="0.1"
-                value={draft.distance}
-                onChange={(event) =>
-                  setDraft((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          distance: Math.max(0, Number(event.target.value || 0)),
+                  />
+                  <div className="quick-row">
+                    {[
+                      { minutes: 30, km: 5 },
+                      { minutes: 45, km: 7.5 },
+                      { minutes: 60, km: 10 },
+                    ].map((preset) => (
+                      <button
+                        key={preset.minutes}
+                        type="button"
+                        className="quick-chip"
+                        onClick={() =>
+                          setDraft((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  minutes: preset.minutes,
+                                  distance: preset.km,
+                                }
+                              : prev
+                          )
                         }
-                      : prev
-                  )
-                }
-              />
-              <div className="quick-row">
-                {[5].map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    className="quick-chip"
-                    onClick={() =>
+                      >
+                        {preset.minutes} min {preset.km} km
+                      </button>
+                    ))}
+                  </div>
+                </label>
+                <label className="modal-field">
+                  <span>Distanse (km)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.1"
+                    value={draft.distance}
+                    onChange={(event) =>
                       setDraft((prev) =>
-                        prev ? { ...prev, distance: value } : prev
+                        prev
+                          ? {
+                              ...prev,
+                              distance: Math.max(
+                                0,
+                                Number(event.target.value || 0)
+                              ),
+                            }
+                          : prev
                       )
                     }
-                  >
-                    {value} km
-                  </button>
-                ))}
-              </div>
-            </label>
+                  />
+                </label>
+              </>
+            )}
             <div className="modal-actions">
               <button type="button" className="button ghost" onClick={closeModal}>
                 Avbryt
