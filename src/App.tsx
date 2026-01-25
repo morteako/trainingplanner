@@ -66,84 +66,113 @@ type Cell = {
   distance: number
 }
 
+type RowType = 'training' | 'info'
+
 type Row = {
   label: string
+  type: RowType
+  tone: Tone
   cells: Record<string, Cell>
 }
 
-const rowToneMap: Record<string, Tone> = {
-  Jobb: 'work-strong',
-  Ting: 'event',
-  Rulle: 'roller',
-  Løping: 'run',
-  Skøyter: 'skate',
-  Styrke: 'strength',
-  Annet: 'neutral',
+type BaseCell = {
+  text: string
+  minutes: number
+  distance: number
 }
 
-const trainingRows = new Set(['Rulle', 'Løping', 'Skøyter', 'Styrke', 'Annet'])
-
-const baseRows: Array<Omit<Row, 'cells'> & { cells: Record<string, Cell> }> = [
+const baseRows: Array<
+  Omit<Row, 'cells'> & { cells: Record<string, BaseCell> }
+> = [
   {
     label: 'Jobb',
+    type: 'info',
+    tone: 'work-strong',
     cells: {
-      Mandag: { text: 'Kontor', tone: 'work-strong', minutes: 0, distance: 0 },
-      Tirsdag: { text: 'Hjem?', tone: 'work-soft', minutes: 0, distance: 0 },
-      Onsdag: { text: 'Kontor', tone: 'work-strong', minutes: 0, distance: 0 },
-      Torsdag: { text: 'Hjem?', tone: 'work-soft', minutes: 0, distance: 0 },
-      Fredag: { text: 'Kontor', tone: 'work-strong', minutes: 0, distance: 0 },
+      Mandag: { text: 'Kontor', minutes: 0, distance: 0 },
+      Tirsdag: { text: 'Hjem?', minutes: 0, distance: 0 },
+      Onsdag: { text: 'Kontor', minutes: 0, distance: 0 },
+      Torsdag: { text: 'Hjem?', minutes: 0, distance: 0 },
+      Fredag: { text: 'Kontor', minutes: 0, distance: 0 },
     },
   },
   {
     label: 'Ting',
+    type: 'info',
+    tone: 'event',
     cells: {
-      Torsdag: { text: 'Peppes', tone: 'event', minutes: 0, distance: 0 },
-      Fredag: { text: 'Bursdag kveld', tone: 'event', minutes: 0, distance: 0 },
-      Søndag: { text: 'Langrenn?', tone: 'event', minutes: 0, distance: 0 },
+      Torsdag: { text: 'Peppes', minutes: 0, distance: 0 },
+      Fredag: { text: 'Bursdag kveld', minutes: 0, distance: 0 },
+      Søndag: { text: 'Langrenn?', minutes: 0, distance: 0 },
     },
   },
   {
     label: 'Rulle',
+    type: 'training',
+    tone: 'roller',
     cells: {
-      Onsdag: { text: 'Rulle rolig', tone: 'roller', minutes: 0, distance: 0 },
-      Torsdag: { text: 'Rulle ints', tone: 'roller', minutes: 0, distance: 0 },
-      Fredag: { text: 'Rulle rolig', tone: 'roller', minutes: 0, distance: 0 },
-      Lørdag: { text: 'Rulle', tone: 'roller', minutes: 0, distance: 0 },
-      Søndag: { text: 'Rulle?', tone: 'roller', minutes: 0, distance: 0 },
+      Onsdag: { text: 'Rulle rolig', minutes: 0, distance: 0 },
+      Torsdag: { text: 'Rulle ints', minutes: 0, distance: 0 },
+      Fredag: { text: 'Rulle rolig', minutes: 0, distance: 0 },
+      Lørdag: { text: 'Rulle', minutes: 0, distance: 0 },
+      Søndag: { text: 'Rulle?', minutes: 0, distance: 0 },
     },
   },
   {
     label: 'Løping',
+    type: 'training',
+    tone: 'run',
     cells: {
-      Mandag: { text: '5km løp', tone: 'run', minutes: 0, distance: 0 },
-      Onsdag: { text: 'Løp til jobb', tone: 'run', minutes: 0, distance: 0 },
-      Lørdag: { text: 'Løping?', tone: 'run', minutes: 0, distance: 0 },
+      Mandag: { text: '5km løp', minutes: 0, distance: 0 },
+      Onsdag: { text: 'Løp til jobb', minutes: 0, distance: 0 },
+      Lørdag: { text: 'Løping?', minutes: 0, distance: 0 },
     },
   },
   {
     label: 'Skøyter',
+    type: 'training',
+    tone: 'skate',
     cells: {
-      Tirsdag: { text: 'Likmil', tone: 'skate', minutes: 0, distance: 0 },
-      Fredag: { text: 'Skøyter', tone: 'skate', minutes: 0, distance: 0 },
-      Lørdag: { text: 'Silkemil?', tone: 'skate', minutes: 0, distance: 0 },
+      Tirsdag: { text: 'Likmil', minutes: 0, distance: 0 },
+      Fredag: { text: 'Skøyter', minutes: 0, distance: 0 },
+      Lørdag: { text: 'Silkemil?', minutes: 0, distance: 0 },
     },
   },
   {
     label: 'Styrke',
+    type: 'training',
+    tone: 'strength',
     cells: {
-      Mandag: { text: 'Styrke', tone: 'strength', minutes: 0, distance: 0 },
-      Torsdag: { text: 'Styrke?', tone: 'strength', minutes: 0, distance: 0 },
+      Mandag: { text: 'Styrke', minutes: 0, distance: 0 },
+      Torsdag: { text: 'Styrke?', minutes: 0, distance: 0 },
     },
   },
   {
     label: 'Annet',
+    type: 'training',
+    tone: 'neutral',
     cells: {},
   },
+]
+
+const baseRowMap = Object.fromEntries(baseRows.map((row) => [row.label, row]))
+
+const toneOptions: Array<{ value: Tone; label: string }> = [
+  { value: 'work-strong', label: 'Oransje' },
+  { value: 'work-soft', label: 'Gul' },
+  { value: 'event', label: 'Lilla' },
+  { value: 'roller', label: 'Grønn' },
+  { value: 'run', label: 'Rød' },
+  { value: 'skate', label: 'Blå' },
+  { value: 'strength', label: 'Rosa' },
+  { value: 'neutral', label: 'Nøytral' },
 ]
 
 const buildInitialRows = (): Row[] =>
   baseRows.map((row) => ({
     label: row.label,
+    type: row.type,
+    tone: row.tone,
     cells: Object.fromEntries(
       days.map((day) => {
         const cell = row.cells[day]
@@ -151,7 +180,7 @@ const buildInitialRows = (): Row[] =>
           day,
           {
             text: cell?.text ?? '',
-            tone: cell?.tone ?? (rowToneMap[row.label] ?? 'neutral'),
+            tone: row.tone,
             minutes: cell?.minutes ?? 0,
             distance: cell?.distance ?? 0,
           },
@@ -163,6 +192,8 @@ const buildInitialRows = (): Row[] =>
 type PlanPayload = {
   rows: Array<{
     label: string
+    type?: RowType
+    tone?: Tone
     cells: Record<string, { text: string; minutes: number; distance: number }>
   }>
 }
@@ -170,6 +201,8 @@ type PlanPayload = {
 const serializePlan = (rows: Row[]): PlanPayload => ({
   rows: rows.map((row) => ({
     label: row.label,
+    type: row.type,
+    tone: row.tone,
     cells: Object.fromEntries(
       days.map((day) => {
         const cell = row.cells[day]
@@ -189,23 +222,32 @@ const serializePlan = (rows: Row[]): PlanPayload => ({
 const hydrateRows = (payload: PlanPayload | null | undefined): Row[] => {
   if (!payload?.rows?.length) return buildInitialRows()
 
-  return payload.rows.map((row) => ({
-    label: row.label,
-    cells: Object.fromEntries(
+  return payload.rows.map((row) => {
+    const baseRow = baseRowMap[row.label]
+    const type = row.type ?? baseRow?.type ?? 'training'
+    const tone = row.tone ?? baseRow?.tone ?? 'neutral'
+    return {
+      label: row.label,
+      type,
+      tone,
+      cells: Object.fromEntries(
       days.map((day) => {
         const cell = row.cells?.[day]
+        const minutes = cell?.minutes ?? 0
+        const distance = cell?.distance ?? 0
         return [
           day,
           {
             text: cell?.text ?? '',
-            minutes: cell?.minutes ?? 0,
-            distance: cell?.distance ?? 0,
-            tone: rowToneMap[row.label] ?? 'neutral',
+            minutes: type === 'training' ? minutes : 0,
+            distance: type === 'training' ? distance : 0,
+            tone,
           },
         ]
       })
     ),
-  }))
+    }
+  })
 }
 
 function App() {
@@ -241,6 +283,12 @@ function App() {
   const [authLoading, setAuthLoading] = useState(false)
   const [planLoading, setPlanLoading] = useState(false)
   const saveTimer = useRef<number | null>(null)
+  const [rowModalIndex, setRowModalIndex] = useState<number | null>(null)
+  const [rowDraft, setRowDraft] = useState<{
+    label: string
+    type: RowType
+    tone: Tone
+  } | null>(null)
 
   const anchorWednesday = new Date(new Date().getFullYear(), 0, 21)
   const baseWeekStart = addDays(anchorWednesday, -weekDayIndex.Onsdag)
@@ -319,16 +367,56 @@ function App() {
     setModalCell({ rowIndex, day })
   }
 
+  const openRowModal = (rowIndex: number) => {
+    const row = rows[rowIndex]
+    setRowDraft({ label: row.label, type: row.type, tone: row.tone })
+    setRowModalIndex(rowIndex)
+  }
+
   const closeModal = () => {
     setModalCell(null)
     setDraft(null)
+  }
+
+  const closeRowModal = () => {
+    setRowModalIndex(null)
+    setRowDraft(null)
+  }
+
+  const deleteCell = () => {
+    if (!modalCell) return
+    const row = rows[modalCell.rowIndex]
+    setRows((prev) =>
+      prev.map((item, index) => {
+        if (index !== modalCell.rowIndex) return item
+        return {
+          ...item,
+          cells: {
+            ...item.cells,
+            [modalCell.day]: {
+              text: '',
+              minutes: 0,
+              distance: 0,
+              tone: row.tone,
+            },
+          },
+        }
+      })
+    )
+    closeModal()
+  }
+
+  const deleteRow = () => {
+    if (rowModalIndex === null) return
+    setRows((prev) => prev.filter((_row, index) => index !== rowModalIndex))
+    closeRowModal()
   }
 
   const saveModal = () => {
     if (!modalCell || !draft) return
     updateCellText(modalCell.rowIndex, modalCell.day, draft.text)
     const label = rows[modalCell.rowIndex]?.label
-    if (label && trainingRows.has(label)) {
+    if (label && rows[modalCell.rowIndex]?.type === 'training') {
       updateCellMinutes(modalCell.rowIndex, modalCell.day, draft.minutes)
       updateCellDistance(modalCell.rowIndex, modalCell.day, draft.distance)
     } else {
@@ -336,6 +424,37 @@ function App() {
       updateCellDistance(modalCell.rowIndex, modalCell.day, 0)
     }
     closeModal()
+  }
+
+  const saveRowModal = () => {
+    if (rowModalIndex === null || !rowDraft) return
+    setRows((prev) =>
+      prev.map((row, index) => {
+        if (index !== rowModalIndex) return row
+        const nextCells = Object.fromEntries(
+          days.map((day) => {
+            const cell = row.cells[day]
+            return [
+              day,
+              {
+                ...cell,
+                tone: rowDraft.tone,
+                minutes: rowDraft.type === 'training' ? cell.minutes : 0,
+                distance: rowDraft.type === 'training' ? cell.distance : 0,
+              },
+            ]
+          })
+        )
+        return {
+          ...row,
+          label: rowDraft.label,
+          type: rowDraft.type,
+          tone: rowDraft.tone,
+          cells: nextCells,
+        }
+      })
+    )
+    closeRowModal()
   }
 
   const moveCell = (
@@ -349,11 +468,11 @@ function App() {
         cells: { ...row.cells },
       }))
       const fromCell = next[from.rowIndex].cells[from.day]
-      const sourceLabel = next[from.rowIndex].label
-      const sourceTone = rowToneMap[sourceLabel] ?? 'neutral'
-      const targetLabel = next[to.rowIndex].label
-      const targetTone = rowToneMap[targetLabel] ?? fromCell.tone
-      const isTrainingTarget = trainingRows.has(targetLabel)
+      const sourceRow = next[from.rowIndex]
+      const targetRow = next[to.rowIndex]
+      const sourceTone = sourceRow.tone
+      const targetTone = targetRow.tone
+      const isTrainingTarget = targetRow.type === 'training'
       next[from.rowIndex].cells[from.day] = {
         text: '',
         minutes: 0,
@@ -373,13 +492,13 @@ function App() {
   const minutesPerDay = days.map((day) =>
     rows.reduce(
       (sum, row) =>
-        sum + (trainingRows.has(row.label) ? row.cells[day].minutes : 0),
+        sum + (row.type === 'training' ? row.cells[day].minutes : 0),
       0
     )
   )
   const totalMinutes = minutesPerDay.reduce((sum, value) => sum + value, 0)
   const totalsPerRow = rows.map((row) => {
-    if (!trainingRows.has(row.label)) {
+    if (row.type !== 'training') {
       return { minutes: 0, distance: 0, count: 0 }
     }
 
@@ -399,13 +518,10 @@ function App() {
     }, 0)
     return { minutes, distance, count }
   })
-  const modalRowLabel = modalCell ? rows[modalCell.rowIndex]?.label : null
-  const isModalTraining = modalRowLabel
-    ? trainingRows.has(modalRowLabel)
+  const isModalTraining = modalCell
+    ? rows[modalCell.rowIndex]?.type === 'training'
     : false
-  const trainingStartIndex = rows.findIndex((row) =>
-    trainingRows.has(row.label)
-  )
+  const trainingStartIndex = rows.findIndex((row) => row.type === 'training')
 
   useEffect(() => {
     const loadSession = async () => {
@@ -612,7 +728,7 @@ function App() {
               )
             })}
             {rows.map((row, rowIndex) => {
-              const isTrainingRow = trainingRows.has(row.label)
+              const isTrainingRow = row.type === 'training'
               const isTrainingStart = rowIndex === trainingStartIndex
               return (
               <div key={row.label} className="row">
@@ -622,9 +738,20 @@ function App() {
                   }`}
                   style={delayStyle(days.length + rowIndex + 1)}
                 >
-                  <div className="row-label-content">
+                  <div
+                    className="row-label-content"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openRowModal(rowIndex)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        openRowModal(rowIndex)
+                      }
+                    }}
+                  >
                     <span>{row.label}</span>
-                    {trainingRows.has(row.label) &&
+                    {row.type === 'training' &&
                       (totalsPerRow[rowIndex].minutes > 0 ||
                         totalsPerRow[rowIndex].distance > 0 ||
                         totalsPerRow[rowIndex].count > 0) && (
@@ -903,12 +1030,109 @@ function App() {
               </>
             )}
             <div className="modal-actions">
-              <button type="button" className="button ghost" onClick={closeModal}>
-                Avbryt
+              <button type="button" className="button ghost" onClick={deleteCell}>
+                Slett
               </button>
-              <button type="button" className="button" onClick={saveModal}>
-                Lagre
+              <div className="modal-actions-right">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={closeModal}
+                >
+                  Avbryt
+                </button>
+                <button type="button" className="button" onClick={saveModal}>
+                  Lagre
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {rowModalIndex !== null && rowDraft && (
+        <div className="modal-backdrop" onClick={closeRowModal}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                saveRowModal()
+              }
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>Rediger kategori</h2>
+            <label className="modal-field">
+              <span>Navn</span>
+              <input
+                type="text"
+                value={rowDraft.label}
+                onChange={(event) =>
+                  setRowDraft((prev) =>
+                    prev ? { ...prev, label: event.target.value } : prev
+                  )
+                }
+              />
+            </label>
+            <label className="modal-field">
+              <span>Type</span>
+              <select
+                value={rowDraft.type}
+                onChange={(event) =>
+                  setRowDraft((prev) =>
+                    prev
+                      ? { ...prev, type: event.target.value as RowType }
+                      : prev
+                  )
+                }
+              >
+                <option value="training">Trening</option>
+                <option value="info">Info</option>
+              </select>
+            </label>
+            <label className="modal-field">
+              <span>Farge</span>
+              <div className="tone-picker">
+                {toneOptions.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={`tone-swatch ${option.value}${
+                      rowDraft.tone === option.value ? ' selected' : ''
+                    }`}
+                    aria-label={option.label}
+                    title={option.label}
+                    onClick={() =>
+                      setRowDraft((prev) =>
+                        prev ? { ...prev, tone: option.value } : prev
+                      )
+                    }
+                  />
+                ))}
+              </div>
+            </label>
+            <div className="modal-actions">
+              <button
+                type="button"
+                className="button ghost"
+                onClick={deleteRow}
+              >
+                Slett
               </button>
+              <div className="modal-actions-right">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={closeRowModal}
+                >
+                  Avbryt
+                </button>
+                <button type="button" className="button" onClick={saveRowModal}>
+                  Lagre
+                </button>
+              </div>
             </div>
           </div>
         </div>

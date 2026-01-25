@@ -237,6 +237,12 @@
   gap: 6px;
 }
 
+.row-label-content:focus-visible {
+  outline: 2px solid rgba(31, 26, 22, 0.35);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
 .row-totals {
   font-size: 0.75rem;
   color: var(--muted);
@@ -370,6 +376,70 @@
   background: #fffdf8;
 }
 
+.modal-field select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(31, 26, 22, 0.2);
+  font: inherit;
+  background: #fffdf8;
+}
+
+.tone-picker {
+  display: grid;
+  grid-template-columns: repeat(4, 26px);
+  gap: 10px;
+}
+
+.tone-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid rgba(31, 26, 22, 0.2);
+  cursor: pointer;
+}
+
+.tone-swatch.selected {
+  outline: 2px solid rgba(31, 26, 22, 0.45);
+  outline-offset: 2px;
+}
+
+.tone-swatch:focus-visible {
+  outline: 2px solid rgba(31, 26, 22, 0.45);
+  outline-offset: 2px;
+}
+
+.tone-swatch.work-strong {
+  background: var(--work-strong);
+}
+
+.tone-swatch.work-soft {
+  background: var(--work-soft);
+}
+
+.tone-swatch.event {
+  background: var(--event);
+}
+
+.tone-swatch.roller {
+  background: var(--roller);
+}
+
+.tone-swatch.run {
+  background: var(--run);
+}
+
+.tone-swatch.skate {
+  background: var(--skate);
+}
+
+.tone-swatch.strength {
+  background: var(--strength);
+}
+
+.tone-swatch.neutral {
+  background: #fffdf8;
+}
+
 .quick-row {
   display: flex;
   gap: 8px;
@@ -394,9 +464,14 @@
 
 .modal-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 10px;
   margin-top: 18px;
+}
+
+.modal-actions-right {
+  display: flex;
+  gap: 10px;
 }
 
 .button {
