@@ -67,6 +67,11 @@
   flex-wrap: wrap;
 }
 
+.plan-status {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
 .auth-email {
   font-size: 0.9rem;
   color: var(--muted);
@@ -257,6 +262,32 @@
 .cell-text {
   min-height: 1.6em;
   text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cell-main {
+  font-weight: 600;
+}
+
+.cell-subtext {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.optional-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: rgba(31, 26, 22, 0.55);
+}
+
+.optional-item {
+  font-weight: 500;
 }
 
 .minutes {
@@ -382,6 +413,46 @@
   border: 1px solid rgba(31, 26, 22, 0.2);
   font: inherit;
   background: #fffdf8;
+}
+
+.optional-day-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.optional-day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.toggle-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toggle-button {
+  border-radius: 999px;
+  border: 1px solid rgba(31, 26, 22, 0.2);
+  background: #fffdf8;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.toggle-button.active {
+  background: #f6d9b6;
+}
+
+.modal-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 14px;
 }
 
 .tone-picker {
