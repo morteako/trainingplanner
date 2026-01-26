@@ -69,7 +69,8 @@ type Cell = {
   workMode?: WorkMode
   workUnsure?: boolean
   extraInfo?: string
-  optionalDays?: string[]
+  alternativeTo?: string
+  whenText?: string
 }
 
 type RowType = 'training' | 'info' | 'work'
@@ -88,7 +89,8 @@ type BaseCell = {
   workMode?: WorkMode
   workUnsure?: boolean
   extraInfo?: string
-  optionalDays?: string[]
+  alternativeTo?: string
+  whenText?: string
 }
 
 const isDistanceRow = (row: Row) => row.label === 'Løping'
@@ -210,7 +212,8 @@ const buildInitialRows = (): Row[] =>
             workMode: cell?.workMode ?? '',
             workUnsure: cell?.workUnsure ?? false,
             extraInfo: cell?.extraInfo ?? '',
-            optionalDays: cell?.optionalDays ?? [],
+            alternativeTo: cell?.alternativeTo ?? '',
+            whenText: cell?.whenText ?? '',
           },
         ]
       })
@@ -231,13 +234,15 @@ type PlanPayload = {
         workMode?: WorkMode
         workUnsure?: boolean
         extraInfo?: string
-        optionalDays?: string[]
+        alternativeTo?: string
+        whenText?: string
       }
     >
   }>
+  lockedDays?: string[]
 }
 
-const serializePlan = (rows: Row[]): PlanPayload => ({
+const serializePlan = (rows: Row[], lockedDays: string[]): PlanPayload => ({
   rows: rows.map((row) => ({
     label: row.label,
     type: row.type,
@@ -254,12 +259,14 @@ const serializePlan = (rows: Row[]): PlanPayload => ({
             workMode: cell.workMode,
             workUnsure: cell.workUnsure,
             extraInfo: cell.extraInfo,
-            optionalDays: cell.optionalDays ?? [],
+            alternativeTo: cell.alternativeTo ?? '',
+            whenText: cell.whenText ?? '',
           },
         ]
       })
     ),
   })),
+  lockedDays,
 })
 
 const hydrateRows = (payload: PlanPayload | null | undefined): Row[] => {
@@ -288,7 +295,8 @@ const hydrateRows = (payload: PlanPayload | null | undefined): Row[] => {
             workMode: cell?.workMode ?? '',
             workUnsure: cell?.workUnsure ?? false,
             extraInfo: cell?.extraInfo ?? '',
-            optionalDays: cell?.optionalDays ?? [],
+            alternativeTo: cell?.alternativeTo ?? '',
+            whenText: cell?.whenText ?? '',
           },
         ]
       })
@@ -297,23 +305,31 @@ const hydrateRows = (payload: PlanPayload | null | undefined): Row[] => {
   })
 }
 
-const getCellLabel = (row: Row, cell: Cell) => {
-  if (row.type === 'work') {
-    const workLabel =
-      cell.workMode === 'office'
-        ? 'Kontor'
-        : cell.workMode === 'home'
-        ? 'Hjem'
-        : cell.text
-    if (!workLabel) return ''
-    return cell.workUnsure ? `${workLabel}?` : workLabel
-  }
-
-  return cell.text
+const sanitizeAlternativeTo = (
+  alternativeTo: string,
+  currentRowLabel: string,
+  trainingLabels: string[]
+) => {
+  if (!alternativeTo) return ''
+  if (alternativeTo === currentRowLabel) return ''
+  return trainingLabels.includes(alternativeTo) ? alternativeTo : ''
 }
 
-const sanitizeOptionalDays = (daysList: string[], currentDay: string) =>
-  Array.from(new Set(daysList.filter((day) => day !== currentDay)))
+const getAlternativeLabel = (row: Row, cell: Cell) => {
+  const label = cell.text.trim()
+  if (label) return label
+  if (cell.minutes > 0 || cell.distance > 0) return row.label
+  return ''
+}
+
+const formatMinutes = (minutes: number) => {
+  if (minutes <= 0) return ''
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  if (hours > 0 && mins > 0) return `${hours}t${mins}m`
+  if (hours > 0) return `${hours}t`
+  return `${mins}m`
+}
 
 function App() {
   const delayStyle = (value: number): CSSProperties =>
@@ -342,7 +358,8 @@ function App() {
     workMode: WorkMode
     workUnsure: boolean
     extraInfo: string
-    optionalDays: string[]
+    alternativeTo: string
+    whenText: string
   } | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [email, setEmail] = useState('')
@@ -356,6 +373,7 @@ function App() {
   >('idle')
   const [planError, setPlanError] = useState<string | null>(null)
   const saveTimer = useRef<number | null>(null)
+  const [lockedDays, setLockedDays] = useState<string[]>([])
   const [rowModalIndex, setRowModalIndex] = useState<number | null>(null)
   const [rowDraft, setRowDraft] = useState<{
     label: string
@@ -469,7 +487,31 @@ function App() {
     )
   }
 
+  const updateCellWhenText = (
+    rowIndex: number,
+    day: string,
+    whenText: string
+  ) => {
+    setRows((prev) =>
+      prev.map((row, index) =>
+        index === rowIndex
+          ? {
+              ...row,
+              cells: {
+                ...row.cells,
+                [day]: {
+                  ...row.cells[day],
+                  whenText,
+                },
+              },
+            }
+          : row
+      )
+    )
+  }
+
   const openModal = (rowIndex: number, day: string) => {
+    if (lockedDays.includes(day)) return
     const cell = rows[rowIndex].cells[day]
     setDraft({
       text: cell.text,
@@ -478,7 +520,8 @@ function App() {
       workMode: cell.workMode ?? '',
       workUnsure: cell.workUnsure ?? false,
       extraInfo: cell.extraInfo ?? '',
-      optionalDays: cell.optionalDays ?? [],
+      alternativeTo: cell.alternativeTo ?? '',
+      whenText: cell.whenText ?? '',
     })
     setModalCell({ rowIndex, day })
   }
@@ -501,6 +544,10 @@ function App() {
 
   const deleteCell = () => {
     if (!modalCell) return
+    if (lockedDays.includes(modalCell.day)) {
+      closeModal()
+      return
+    }
     const row = rows[modalCell.rowIndex]
     setRows((prev) =>
       prev.map((item, index) => {
@@ -517,7 +564,8 @@ function App() {
               workMode: '',
               workUnsure: false,
               extraInfo: '',
-              optionalDays: [],
+              alternativeTo: '',
+              whenText: '',
             },
           },
         }
@@ -526,10 +574,10 @@ function App() {
     closeModal()
   }
 
-  const updateCellOptionalDays = (
+  const updateCellAlternativeTo = (
     rowIndex: number,
     day: string,
-    optionalDays: string[]
+    alternativeTo: string
   ) => {
     setRows((prev) =>
       prev.map((row, index) =>
@@ -540,7 +588,7 @@ function App() {
                 ...row.cells,
                 [day]: {
                   ...row.cells[day],
-                  optionalDays,
+                  alternativeTo,
                 },
               },
             }
@@ -557,13 +605,21 @@ function App() {
 
   const saveModal = () => {
     if (!modalCell || !draft) return
-    updateCellOptionalDays(
-      modalCell.rowIndex,
-      modalCell.day,
-      sanitizeOptionalDays(draft.optionalDays, modalCell.day)
-    )
-    updateCellText(modalCell.rowIndex, modalCell.day, draft.text)
+    if (lockedDays.includes(modalCell.day)) {
+      closeModal()
+      return
+    }
     const row = rows[modalCell.rowIndex]
+    const trainingLabels = rows
+      .filter((item) => item.type === 'training')
+      .map((item) => item.label)
+    const alternativeTo =
+      row?.type === 'training'
+        ? sanitizeAlternativeTo(draft.alternativeTo, row.label, trainingLabels)
+        : ''
+    updateCellAlternativeTo(modalCell.rowIndex, modalCell.day, alternativeTo)
+    updateCellWhenText(modalCell.rowIndex, modalCell.day, draft.whenText)
+    updateCellText(modalCell.rowIndex, modalCell.day, draft.text)
     const rowType = row?.type
     if (rowType === 'training') {
       updateCellMinutes(modalCell.rowIndex, modalCell.day, draft.minutes)
@@ -593,8 +649,11 @@ function App() {
 
   const saveRowModal = () => {
     if (rowModalIndex === null || !rowDraft) return
-    setRows((prev) =>
-      prev.map((row, index) => {
+    setRows((prev) => {
+      const currentRow = prev[rowModalIndex]
+      const oldLabel = currentRow?.label
+      const oldType = currentRow?.type
+      const updatedRows = prev.map((row, index) => {
         if (index !== rowModalIndex) return row
         const nextCells = Object.fromEntries(
           days.map((day) => {
@@ -611,6 +670,8 @@ function App() {
                 workMode: rowDraft.type === 'work' ? cell.workMode : '',
                 workUnsure: rowDraft.type === 'work' ? cell.workUnsure : false,
                 extraInfo: rowDraft.type === 'work' ? cell.extraInfo : '',
+                alternativeTo:
+                  rowDraft.type === 'training' ? cell.alternativeTo ?? '' : '',
               },
             ]
           })
@@ -623,7 +684,31 @@ function App() {
           cells: nextCells,
         }
       })
-    )
+
+      if (!oldLabel || (oldLabel === rowDraft.label && oldType === rowDraft.type)) {
+        return updatedRows
+      }
+
+      return updatedRows.map((row) => {
+        const nextCells = Object.fromEntries(
+          days.map((day) => {
+            const cell = row.cells[day]
+            let alternativeTo = cell.alternativeTo ?? ''
+            if (alternativeTo === oldLabel) {
+              alternativeTo = rowDraft.type === 'training' ? rowDraft.label : ''
+            }
+            return [
+              day,
+              {
+                ...cell,
+                alternativeTo,
+              },
+            ]
+          })
+        )
+        return { ...row, cells: nextCells }
+      })
+    })
     closeRowModal()
   }
 
@@ -631,8 +716,12 @@ function App() {
     from: { rowIndex: number; day: string },
     to: { rowIndex: number; day: string }
   ) => {
+    if (lockedDays.includes(from.day) || lockedDays.includes(to.day)) return
     if (from.rowIndex === to.rowIndex && from.day === to.day) return
     setRows((prev) => {
+      const trainingLabels = prev
+        .filter((row) => row.type === 'training')
+        .map((row) => row.label)
       const next = prev.map((row) => ({
         ...row,
         cells: { ...row.cells },
@@ -653,7 +742,8 @@ function App() {
         workMode: '',
         workUnsure: false,
         extraInfo: '',
-        optionalDays: [],
+        alternativeTo: '',
+        whenText: '',
       }
       next[to.rowIndex].cells[to.day] = {
         ...fromCell,
@@ -666,10 +756,15 @@ function App() {
           targetRow.type === 'work' ? fromCell.workUnsure ?? false : false,
         extraInfo:
           targetRow.type === 'work' ? fromCell.extraInfo ?? '' : '',
-        optionalDays: sanitizeOptionalDays(
-          fromCell.optionalDays ?? [],
-          to.day
-        ),
+        alternativeTo:
+          targetRow.type === 'training'
+            ? sanitizeAlternativeTo(
+                fromCell.alternativeTo ?? '',
+                targetRow.label,
+                trainingLabels
+              )
+            : '',
+        whenText: fromCell.whenText ?? '',
       }
       return next
     })
@@ -704,15 +799,10 @@ function App() {
     }, 0)
     return { minutes, distance, count }
   })
-  const isModalTraining = modalCell
-    ? rows[modalCell.rowIndex]?.type === 'training'
-    : false
-  const isModalWork = modalCell
-    ? rows[modalCell.rowIndex]?.type === 'work'
-    : false
-  const isModalDistance = modalCell
-    ? isDistanceRow(rows[modalCell.rowIndex])
-    : false
+  const modalRow = modalCell ? rows[modalCell.rowIndex] : null
+  const isModalTraining = modalRow?.type === 'training'
+  const isModalWork = modalRow?.type === 'work'
+  const isModalDistance = modalRow ? isDistanceRow(modalRow) : false
   const trainingStartIndex = rows.findIndex((row) => row.type === 'training')
 
   useEffect(() => {
@@ -747,9 +837,12 @@ function App() {
         .eq('week_number', weekNumber)
         .maybeSingle()
       if (!error && data?.data) {
-        setRows(hydrateRows(data.data as PlanPayload))
+        const payload = data.data as PlanPayload
+        setRows(hydrateRows(payload))
+        setLockedDays(payload.lockedDays ?? [])
       } else if (!error) {
         setRows(buildInitialRows())
+        setLockedDays([])
       } else {
         setPlanError(error.message)
       }
@@ -764,13 +857,16 @@ function App() {
     const stored = window.localStorage.getItem(localPlanKey)
     if (!stored) {
       setRows(buildInitialRows())
+      setLockedDays([])
       return
     }
     try {
       const parsed = JSON.parse(stored) as PlanPayload
       setRows(hydrateRows(parsed))
+      setLockedDays(parsed.lockedDays ?? [])
     } catch {
       setRows(buildInitialRows())
+      setLockedDays([])
     }
   }, [session?.user, localPlanKey])
 
@@ -789,7 +885,7 @@ function App() {
           week_start: weekStart,
           week_number: weekNumber,
           year: weekYear,
-          data: serializePlan(rows),
+          data: serializePlan(rows, lockedDays),
         },
         { onConflict: 'user_id,year,week_number' }
       )
@@ -806,12 +902,15 @@ function App() {
         window.clearTimeout(saveTimer.current)
       }
     }
-  }, [rows, session?.user, planLoading, weekStart, weekNumber, weekYear])
+  }, [rows, lockedDays, session?.user, planLoading, weekStart, weekNumber, weekYear])
 
   useEffect(() => {
     if (session?.user) return
-    window.localStorage.setItem(localPlanKey, JSON.stringify(serializePlan(rows)))
-  }, [rows, session?.user, localPlanKey])
+    window.localStorage.setItem(
+      localPlanKey,
+      JSON.stringify(serializePlan(rows, lockedDays))
+    )
+  }, [rows, lockedDays, session?.user, localPlanKey])
 
   const handleSignIn = async (event: FormEvent) => {
     event.preventDefault()
@@ -946,14 +1045,29 @@ function App() {
             <div className="cell corner" aria-hidden="true" />
             {days.map((day, index) => {
               const isWeekend = day === 'Lørdag' || day === 'Søndag'
+              const isDayLocked = lockedDays.includes(day)
               return (
                 <div
                   key={day}
                   className={`cell header${isWeekend ? ' weekend' : ''}`}
                   style={delayStyle(index + 1)}
                 >
-                <span>{day}</span>
-                <span className="date">{weekDates[index]}</span>
+                  <span>{day}</span>
+                  <span className="date">{weekDates[index]}</span>
+                  <label className="day-lock">
+                    <input
+                      type="checkbox"
+                      checked={isDayLocked}
+                      onChange={(event) =>
+                        setLockedDays((prev) =>
+                          event.target.checked
+                            ? Array.from(new Set([...prev, day]))
+                            : prev.filter((item) => item !== day)
+                        )
+                      }
+                    />
+                    <span>Ferdig</span>
+                  </label>
                 </div>
               )
             })}
@@ -995,7 +1109,7 @@ function App() {
                             ? ' • '
                             : ''}
                           {totalsPerRow[rowIndex].minutes > 0
-                            ? `${totalsPerRow[rowIndex].minutes} min`
+                            ? formatMinutes(totalsPerRow[rowIndex].minutes)
                             : ''}
                           {totalsPerRow[rowIndex].minutes > 0 &&
                           isDistanceRow(row) &&
@@ -1014,6 +1128,7 @@ function App() {
                   const cell = row.cells[day]
                   const tone = cell.tone
                   const isWeekend = day === 'Lørdag' || day === 'Søndag'
+                  const isDayLocked = lockedDays.includes(day)
                   const isWorkRow = row.type === 'work'
                   const allowDistance = isDistanceRow(row)
                   const isEmpty =
@@ -1031,15 +1146,19 @@ function App() {
                   const workTitle =
                     workLabel && cell.workUnsure ? `${workLabel}?` : workLabel
                   const extraInfo = cell.extraInfo?.trim()
-                  const optionalEntries = days.flatMap((sourceDay) => {
-                    if (sourceDay === day) return []
-                    const sourceCell = row.cells[sourceDay]
-                    if (!sourceCell.optionalDays?.includes(day)) return []
-                    const label = getCellLabel(row, sourceCell).trim()
-                    if (!label) return []
-                    return [{ label, sourceDay }]
-                  })
-                  const hasOptionalEntries = optionalEntries.length > 0
+                  const whenText = cell.whenText?.trim()
+                  const alternativeEntries = isTrainingRow
+                    ? rows.flatMap((sourceRow, sourceRowIndex) => {
+                        if (sourceRow.type !== 'training') return []
+                        if (sourceRowIndex === rowIndex) return []
+                        const sourceCell = sourceRow.cells[day]
+                        if (sourceCell.alternativeTo !== row.label) return []
+                        const label = getAlternativeLabel(sourceRow, sourceCell)
+                        if (!label) return []
+                        return [{ label }]
+                      })
+                    : []
+                  const hasAlternatives = alternativeEntries.length > 0
                   const isDragSource =
                     dragging?.rowIndex === rowIndex && dragging?.day === day
                   const isDragOver =
@@ -1048,18 +1167,18 @@ function App() {
                     <div
                       key={`${row.label}-${day}`}
                       className={`cell slot ${tone}${
-                        isEmpty && !hasOptionalEntries ? ' empty' : ''
+                        isEmpty && !hasAlternatives ? ' empty' : ''
                       }${isWeekend ? ' weekend' : ''}${
                         isDragOver ? ' drop-target' : ''
                       }${isDragSource ? ' drag-source' : ''}${
                         isTrainingStart ? ' group-divider' : ''
-                      }`}
+                      }${isDayLocked ? ' locked' : ''}`}
                       style={delayStyle(
                         (rowIndex + 1) * days.length + dayIndex + 1
                       )}
-                      draggable={!isEmpty}
+                      draggable={!isEmpty && !isDayLocked}
                       onDragStart={(event) => {
-                        if (isEmpty) return
+                        if (isEmpty || isDayLocked) return
                         event.dataTransfer.setData('text/plain', 'cell')
                         event.dataTransfer.effectAllowed = 'move'
                         setDragging({ rowIndex, day })
@@ -1069,6 +1188,7 @@ function App() {
                         setDragOver(null)
                       }}
                       onDragOver={(event) => {
+                        if (isDayLocked) return
                         event.preventDefault()
                         setDragOver({ rowIndex, day })
                         event.dataTransfer.dropEffect = 'move'
@@ -1081,6 +1201,7 @@ function App() {
                         )
                       }}
                       onDrop={(event) => {
+                        if (isDayLocked) return
                         event.preventDefault()
                         if (dragging) {
                           moveCell(dragging, { rowIndex, day })
@@ -1096,6 +1217,7 @@ function App() {
                             className="add-button"
                             aria-label="Legg til"
                             onClick={() => openModal(rowIndex, day)}
+                            disabled={isDayLocked}
                           >
                             <svg
                               className="plus-icon"
@@ -1104,16 +1226,16 @@ function App() {
                               aria-hidden="true"
                             >
                               <path d="M12 5v14M5 12h14" />
-                            </svg>
+                          </svg>
                           </button>
-                          {hasOptionalEntries && (
-                            <div className="optional-list">
-                              {optionalEntries.map((entry) => (
+                          {hasAlternatives && (
+                            <div className="alternative-list">
+                              {alternativeEntries.map((entry, index) => (
                                 <span
-                                  key={`${entry.sourceDay}-${entry.label}`}
-                                  className="optional-item"
+                                  key={`${entry.label}-${index}`}
+                                  className="alternative-item"
                                 >
-                                  {entry.label}
+                                  Alternativ: {entry.label}
                                 </span>
                               ))}
                             </div>
@@ -1130,19 +1252,31 @@ function App() {
                                     {extraInfo}
                                   </span>
                                 )}
+                                {whenText && (
+                                  <span className="cell-subtext">
+                                    {whenText}
+                                  </span>
+                                )}
                               </>
                             ) : (
-                              cell.text
+                              <>
+                                <span className="cell-main">{cell.text}</span>
+                                {whenText && (
+                                  <span className="cell-subtext">
+                                    {whenText}
+                                  </span>
+                                )}
+                              </>
                             )}
                           </div>
-                          {hasOptionalEntries && (
-                            <div className="optional-list">
-                              {optionalEntries.map((entry) => (
+                          {hasAlternatives && (
+                            <div className="alternative-list">
+                              {alternativeEntries.map((entry, index) => (
                                 <span
-                                  key={`${entry.sourceDay}-${entry.label}`}
-                                  className="optional-item"
+                                  key={`${entry.label}-${index}`}
+                                  className="alternative-item"
                                 >
-                                  {entry.label}
+                                  Alternativ: {entry.label}
                                 </span>
                               ))}
                             </div>
@@ -1153,6 +1287,7 @@ function App() {
                               className="edit-button"
                               aria-label="Rediger"
                               onClick={() => openModal(rowIndex, day)}
+                              disabled={isDayLocked}
                             >
                               <svg
                                 className="pen-icon"
@@ -1169,7 +1304,7 @@ function App() {
                                 (allowDistance && cell.distance > 0)) && (
                                 <span>
                                   {cell.minutes > 0
-                                    ? `${cell.minutes} min`
+                                    ? formatMinutes(cell.minutes)
                                     : ''}
                                   {cell.minutes > 0 &&
                                   allowDistance &&
@@ -1203,7 +1338,7 @@ function App() {
                   className="cell slot summary-cell"
                   style={delayStyle((rows.length + 2) * days.length + index + 1)}
                 >
-                  {value} min
+                  {formatMinutes(value)}
                 </div>
               ))}
             </div>
@@ -1220,7 +1355,9 @@ function App() {
                   className="cell slot total-cell"
                   style={delayStyle((rows.length + 4) * days.length + index + 1)}
                 >
-                  {index === days.length - 1 ? `${totalMinutes} min` : ''}
+                  {index === days.length - 1
+                    ? formatMinutes(totalMinutes)
+                    : ''}
                 </div>
               ))}
             </div>
@@ -1256,6 +1393,18 @@ function App() {
                 />
               </label>
             )}
+            <label className="modal-field">
+              <span>Når</span>
+              <input
+                type="text"
+                value={draft.whenText}
+                onChange={(event) =>
+                  setDraft((prev) =>
+                    prev ? { ...prev, whenText: event.target.value } : prev
+                  )
+                }
+              />
+            </label>
             {isModalWork && (
               <>
                 <label className="modal-field">
@@ -1395,36 +1544,33 @@ function App() {
                 )}
               </>
             )}
-            <label className="modal-field">
-              <span>Valgfrie dager</span>
-              <div className="optional-day-grid">
-                {days
-                  .filter((day) => day !== modalCell.day)
-                  .map((day) => (
-                    <label key={day} className="optional-day">
-                      <input
-                        type="checkbox"
-                        checked={draft.optionalDays.includes(day)}
-                        onChange={(event) =>
-                          setDraft((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  optionalDays: event.target.checked
-                                    ? [...prev.optionalDays, day]
-                                    : prev.optionalDays.filter(
-                                        (item) => item !== day
-                                      ),
-                                }
-                              : prev
-                          )
-                        }
-                      />
-                      <span>{day}</span>
-                    </label>
-                  ))}
-              </div>
-            </label>
+            {isModalTraining && (
+              <label className="modal-field">
+                <span>Alternativ til</span>
+                <select
+                  value={draft.alternativeTo}
+                  onChange={(event) =>
+                    setDraft((prev) =>
+                      prev
+                        ? { ...prev, alternativeTo: event.target.value }
+                        : prev
+                    )
+                  }
+                >
+                  <option value="">Ingen</option>
+                  {rows
+                    .filter(
+                      (row) =>
+                        row.type === 'training' && row.label !== modalRow?.label
+                    )
+                    .map((row) => (
+                      <option key={row.label} value={row.label}>
+                        {row.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
             <div className="modal-actions">
               <button type="button" className="button ghost" onClick={deleteCell}>
                 Slett

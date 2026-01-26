@@ -198,6 +198,15 @@
   outline-offset: -4px;
 }
 
+.cell.locked {
+  opacity: 0.7;
+}
+
+.cell.locked .cell-text,
+.cell.locked .minutes {
+  color: var(--muted);
+}
+
 .corner {
   background: linear-gradient(130deg, #f9efe0 20%, #f6dec2);
   position: sticky;
@@ -214,6 +223,19 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
+}
+
+.day-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.day-lock input {
+  accent-color: var(--accent);
 }
 
 .weekend {
@@ -277,16 +299,16 @@
   font-weight: 500;
 }
 
-.optional-list {
+.alternative-list {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-top: 6px;
   font-size: 0.78rem;
-  color: rgba(31, 26, 22, 0.55);
+  color: rgba(31, 26, 22, 0.5);
 }
 
-.optional-item {
+.alternative-item {
   font-weight: 500;
 }
 
@@ -323,6 +345,12 @@
   cursor: pointer;
   display: grid;
   place-items: center;
+}
+
+.add-button:disabled,
+.edit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
 }
 
 .add-button:focus-visible {
@@ -415,18 +443,6 @@
   background: #fffdf8;
 }
 
-.optional-day-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px 12px;
-}
-
-.optional-day {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-}
 
 .toggle-group {
   display: flex;
