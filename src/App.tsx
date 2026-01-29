@@ -61,6 +61,8 @@ type Tone =
 
 type WorkMode = 'office' | 'home' | ''
 
+type Intensity = '' | 'hard' | 'medium' | 'rolig'
+
 type Cell = {
   text: string
   tone: Tone
@@ -71,6 +73,7 @@ type Cell = {
   extraInfo?: string
   alternativeTo?: string
   whenText?: string
+  intensity?: Intensity
 }
 
 type RowType = 'training' | 'info' | 'work'
@@ -91,6 +94,7 @@ type BaseCell = {
   extraInfo?: string
   alternativeTo?: string
   whenText?: string
+  intensity?: Intensity
 }
 
 const isDistanceRow = (row: Row) => row.label === 'Løping'
@@ -175,6 +179,7 @@ const buildInitialRows = (): Row[] =>
             extraInfo: cell?.extraInfo ?? '',
             alternativeTo: cell?.alternativeTo ?? '',
             whenText: cell?.whenText ?? '',
+            intensity: cell?.intensity ?? '',
           },
         ]
       })
@@ -197,6 +202,7 @@ type PlanPayload = {
         extraInfo?: string
         alternativeTo?: string
         whenText?: string
+        intensity?: Intensity
       }
     >
   }>
@@ -222,6 +228,7 @@ const serializePlan = (rows: Row[], lockedDays: string[]): PlanPayload => ({
             extraInfo: cell.extraInfo,
             alternativeTo: cell.alternativeTo ?? '',
             whenText: cell.whenText ?? '',
+            intensity: cell.intensity ?? '',
           },
         ]
       })
@@ -258,6 +265,7 @@ const hydrateRows = (payload: PlanPayload | null | undefined): Row[] => {
             extraInfo: cell?.extraInfo ?? '',
             alternativeTo: cell?.alternativeTo ?? '',
             whenText: cell?.whenText ?? '',
+            intensity: cell?.intensity ?? '',
           },
         ]
       })
@@ -298,7 +306,8 @@ const isCellEmpty = (cell: Cell) =>
   cell.distance === 0 &&
   (cell.workMode ?? '') === '' &&
   (cell.extraInfo ?? '').trim() === '' &&
-  (cell.whenText ?? '').trim() === ''
+  (cell.whenText ?? '').trim() === '' &&
+  (cell.intensity ?? '') === ''
 
 const getWorkLabel = (cell: Cell) => {
   const workLabel =
@@ -351,6 +360,7 @@ const getActivitySignature = (cell: Cell) =>
     extraInfo: cell.extraInfo ?? '',
     alternativeTo: cell.alternativeTo ?? '',
     whenText: cell.whenText ?? '',
+    intensity: cell.intensity ?? '',
   })
 
 function App() {
@@ -386,6 +396,7 @@ function App() {
     extraInfo: string
     alternativeTo: string
     whenText: string
+    intensity: Intensity
   } | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [email, setEmail] = useState('')
@@ -523,6 +534,29 @@ function App() {
     )
   }
 
+  const updateCellIntensity = (
+    rowIndex: number,
+    day: string,
+    intensity: Intensity
+  ) => {
+    setRows((prev) =>
+      prev.map((row, index) =>
+        index === rowIndex
+          ? {
+              ...row,
+              cells: {
+                ...row.cells,
+                [day]: {
+                  ...row.cells[day],
+                  intensity,
+                },
+              },
+            }
+          : row
+      )
+    )
+  }
+
   const updateCellWhenText = (
     rowIndex: number,
     day: string,
@@ -547,7 +581,6 @@ function App() {
   }
 
   const openModal = (rowIndex: number, day: string) => {
-    if (lockedDays.includes(day)) return
     const cell = rows[rowIndex].cells[day]
     setDraft({
       text: cell.text,
@@ -558,6 +591,7 @@ function App() {
       extraInfo: cell.extraInfo ?? '',
       alternativeTo: cell.alternativeTo ?? '',
       whenText: cell.whenText ?? '',
+      intensity: cell.intensity ?? '',
     })
     setModalCell({ rowIndex, day })
   }
@@ -580,10 +614,6 @@ function App() {
 
   const deleteCell = () => {
     if (!modalCell) return
-    if (lockedDays.includes(modalCell.day)) {
-      closeModal()
-      return
-    }
     const row = rows[modalCell.rowIndex]
     setRows((prev) =>
       prev.map((item, index) => {
@@ -602,6 +632,7 @@ function App() {
               extraInfo: '',
               alternativeTo: '',
               whenText: '',
+              intensity: '',
             },
           },
         }
@@ -611,7 +642,6 @@ function App() {
   }
 
   const deleteCellAt = (rowIndex: number, day: string) => {
-    if (lockedDays.includes(day)) return
     const row = rows[rowIndex]
     const cell = row.cells[day]
     if (isCellEmpty(cell)) return
@@ -670,10 +700,6 @@ function App() {
 
   const saveModal = () => {
     if (!modalCell || !draft) return
-    if (lockedDays.includes(modalCell.day)) {
-      closeModal()
-      return
-    }
     const row = rows[modalCell.rowIndex]
     const trainingLabels = rows
       .filter((item) => item.type === 'training')
@@ -683,6 +709,11 @@ function App() {
         ? sanitizeAlternativeTo(draft.alternativeTo, row.label, trainingLabels)
         : ''
     updateCellAlternativeTo(modalCell.rowIndex, modalCell.day, alternativeTo)
+    updateCellIntensity(
+      modalCell.rowIndex,
+      modalCell.day,
+      row?.type === 'training' ? draft.intensity : ''
+    )
     updateCellWhenText(modalCell.rowIndex, modalCell.day, draft.whenText)
     updateCellText(modalCell.rowIndex, modalCell.day, draft.text)
     const rowType = row?.type
@@ -809,6 +840,7 @@ function App() {
         extraInfo: '',
         alternativeTo: '',
         whenText: '',
+        intensity: '',
       }
       next[to.rowIndex].cells[to.day] = {
         ...fromCell,
@@ -830,6 +862,7 @@ function App() {
               )
             : '',
         whenText: fromCell.whenText ?? '',
+        intensity: targetRow.type === 'training' ? fromCell.intensity ?? '' : '',
       }
       return next
     })
@@ -840,6 +873,19 @@ function App() {
       (sum, row) =>
         sum + (row.type === 'training' ? row.cells[day].minutes : 0),
       0
+    )
+  )
+  const intensitiesPerDay = days.map((day) =>
+    rows.reduce(
+      (counts, row) => {
+        if (row.type !== 'training') return counts
+        const intensity = row.cells[day].intensity ?? ''
+        if (intensity) {
+          counts[intensity] += 1
+        }
+        return counts
+      },
+      { hard: 0, medium: 0, rolig: 0 }
     )
   )
   const totalMinutes = minutesPerDay.reduce((sum, value) => sum + value, 0)
@@ -1303,6 +1349,18 @@ function App() {
             {rows.map((row, rowIndex) => {
               const isTrainingRow = row.type === 'training'
               const isTrainingStart = rowIndex === trainingStartIndex
+              const rowIntensityCounts = isTrainingRow
+                ? days.reduce(
+                    (counts, day) => {
+                      const intensity = row.cells[day].intensity ?? ''
+                      if (intensity) {
+                        counts[intensity] += 1
+                      }
+                      return counts
+                    },
+                    { hard: 0, medium: 0, rolig: 0 }
+                  )
+                : { hard: 0, medium: 0, rolig: 0 }
               return (
               <div key={row.label} className="row">
                 <div
@@ -1330,7 +1388,11 @@ function App() {
                         totalsPerRow[rowIndex].count > 0) && (
                         <span className="row-totals">
                           {totalsPerRow[rowIndex].count > 0
-                            ? `${totalsPerRow[rowIndex].count} økt`
+                            ? `${totalsPerRow[rowIndex].count} ${
+                                totalsPerRow[rowIndex].count > 1
+                                  ? 'økter'
+                                  : 'økt'
+                              }`
                             : ''}
                           {totalsPerRow[rowIndex].count > 0 &&
                           (totalsPerRow[rowIndex].minutes > 0 ||
@@ -1351,6 +1413,24 @@ function App() {
                             : ''}
                         </span>
                       )}
+                    {isTrainingRow && (
+                      <div className="intensity-summary">
+                        {(['hard', 'medium', 'rolig'] as Intensity[]).map(
+                          (level) =>
+                            rowIntensityCounts[level] > 0 ? (
+                              <span
+                                key={level}
+                                className={`intensity-dot ${level}`}
+                                aria-label={`${rowIntensityCounts[level]}`}
+                              >
+                                {rowIntensityCounts[level] > 1
+                                  ? rowIntensityCounts[level]
+                                  : ''}
+                              </span>
+                            ) : null
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 {days.map((day, dayIndex) => {
@@ -1364,6 +1444,7 @@ function App() {
                   const workTitle = getWorkLabel(cell)
                   const extraInfo = cell.extraInfo?.trim()
                   const whenText = cell.whenText?.trim()
+                  const intensity = cell.intensity ?? ''
                   const alternativeEntries = isTrainingRow
                     ? rows.flatMap((sourceRow, sourceRowIndex) => {
                         if (sourceRow.type !== 'training') return []
@@ -1442,7 +1523,6 @@ function App() {
                             className="add-button"
                             aria-label="Legg til"
                             onClick={() => openModal(rowIndex, day)}
-                            disabled={isDayLocked}
                           >
                             <svg
                               className="plus-icon"
@@ -1512,7 +1592,6 @@ function App() {
                               className="edit-button"
                               aria-label="Rediger"
                               onClick={() => openModal(rowIndex, day)}
-                              disabled={isDayLocked}
                             >
                               <svg
                                 className="pen-icon"
@@ -1541,6 +1620,12 @@ function App() {
                                     : ''}
                                 </span>
                               )}
+                            {isTrainingRow && intensity && (
+                              <span
+                                className={`intensity-dot ${intensity}`}
+                                aria-hidden="true"
+                              />
+                            )}
                           </div>
                         </>
                       )}
@@ -1564,6 +1649,22 @@ function App() {
                   style={delayStyle((rows.length + 2) * days.length + index + 1)}
                 >
                   {formatMinutes(value)}
+                  <div className="intensity-summary">
+                    {(['hard', 'medium', 'rolig'] as Intensity[]).map(
+                      (level) =>
+                        intensitiesPerDay[index][level] > 0 ? (
+                          <span
+                            key={level}
+                            className={`intensity-dot ${level}`}
+                            aria-label={`${intensitiesPerDay[index][level]}`}
+                          >
+                            {intensitiesPerDay[index][level] > 1
+                              ? intensitiesPerDay[index][level]
+                              : ''}
+                          </span>
+                        ) : null
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1792,6 +1893,7 @@ function App() {
                                 extraInfo: option.cell.extraInfo ?? '',
                                 alternativeTo: option.cell.alternativeTo ?? '',
                                 whenText: option.cell.whenText ?? '',
+                                intensity: option.cell.intensity ?? '',
                               }
                             : prev
                         )
@@ -1829,6 +1931,38 @@ function App() {
                       </option>
                     ))}
                 </select>
+              </label>
+            )}
+            {isModalTraining && (
+              <label className="modal-field">
+                <span>Intensitet</span>
+                <div className="toggle-group">
+                  {([
+                    { value: '', label: 'Ingen' },
+                    { value: 'rolig', label: 'Rolig' },
+                    { value: 'medium', label: 'Medium' },
+                    { value: 'hard', label: 'Hard' },
+                  ] as Array<{ value: Intensity; label: string }>).map(
+                    (option) => (
+                      <button
+                        key={option.value || 'none'}
+                        type="button"
+                        className={`toggle-button${
+                          draft.intensity === option.value ? ' active' : ''
+                        }`}
+                        onClick={() =>
+                          setDraft((prev) =>
+                            prev
+                              ? { ...prev, intensity: option.value }
+                              : prev
+                          )
+                        }
+                      >
+                        {option.label}
+                      </button>
+                    )
+                  )}
+                </div>
               </label>
             )}
             <label className="modal-field">
