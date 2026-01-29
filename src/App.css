@@ -139,6 +139,11 @@
   cursor: pointer;
 }
 
+.week-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .week-button:focus-visible {
   outline: 2px solid rgba(31, 26, 22, 0.35);
   outline-offset: 2px;

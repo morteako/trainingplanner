@@ -102,76 +102,37 @@ const baseRows: Array<
     label: 'Jobb',
     type: 'work',
     tone: 'work-strong',
-    cells: {
-      Mandag: { text: '', minutes: 0, distance: 0, workMode: 'office' },
-      Tirsdag: {
-        text: '',
-        minutes: 0,
-        distance: 0,
-        workMode: 'home',
-        workUnsure: true,
-      },
-      Onsdag: { text: '', minutes: 0, distance: 0, workMode: 'office' },
-      Torsdag: {
-        text: '',
-        minutes: 0,
-        distance: 0,
-        workMode: 'home',
-        workUnsure: true,
-      },
-      Fredag: { text: '', minutes: 0, distance: 0, workMode: 'office' },
-    },
+    cells: {},
   },
   {
     label: 'Ting',
     type: 'info',
     tone: 'event',
-    cells: {
-      Torsdag: { text: 'Peppes', minutes: 0, distance: 0 },
-      Fredag: { text: 'Bursdag kveld', minutes: 0, distance: 0 },
-      Søndag: { text: 'Langrenn?', minutes: 0, distance: 0 },
-    },
+    cells: {},
   },
   {
     label: 'Rulle',
     type: 'training',
     tone: 'roller',
-    cells: {
-      Onsdag: { text: 'Rulle rolig', minutes: 0, distance: 0 },
-      Torsdag: { text: 'Rulle ints', minutes: 0, distance: 0 },
-      Fredag: { text: 'Rulle rolig', minutes: 0, distance: 0 },
-      Lørdag: { text: 'Rulle', minutes: 0, distance: 0 },
-      Søndag: { text: 'Rulle?', minutes: 0, distance: 0 },
-    },
+    cells: {},
   },
   {
     label: 'Løping',
     type: 'training',
     tone: 'run',
-    cells: {
-      Mandag: { text: '5km løp', minutes: 0, distance: 0 },
-      Onsdag: { text: 'Løp til jobb', minutes: 0, distance: 0 },
-      Lørdag: { text: 'Løping?', minutes: 0, distance: 0 },
-    },
+    cells: {},
   },
   {
     label: 'Skøyter',
     type: 'training',
     tone: 'skate',
-    cells: {
-      Tirsdag: { text: 'Likmil', minutes: 0, distance: 0 },
-      Fredag: { text: 'Skøyter', minutes: 0, distance: 0 },
-      Lørdag: { text: 'Silkemil?', minutes: 0, distance: 0 },
-    },
+    cells: {},
   },
   {
     label: 'Styrke',
     type: 'training',
     tone: 'strength',
-    cells: {
-      Mandag: { text: 'Styrke', minutes: 0, distance: 0 },
-      Torsdag: { text: 'Styrke?', minutes: 0, distance: 0 },
-    },
+    cells: {},
   },
   {
     label: 'Annet',
@@ -331,6 +292,67 @@ const formatMinutes = (minutes: number) => {
   return `${mins}m`
 }
 
+const isCellEmpty = (cell: Cell) =>
+  cell.text.trim() === '' &&
+  cell.minutes === 0 &&
+  cell.distance === 0 &&
+  (cell.workMode ?? '') === '' &&
+  (cell.extraInfo ?? '').trim() === '' &&
+  (cell.whenText ?? '').trim() === ''
+
+const getWorkLabel = (cell: Cell) => {
+  const workLabel =
+    cell.workMode === 'office'
+      ? 'Kontor'
+      : cell.workMode === 'home'
+      ? 'Hjem'
+      : cell.text
+  if (!workLabel) return ''
+  return cell.workUnsure ? `${workLabel}?` : workLabel
+}
+
+const getCopyLabel = (row: Row, cell: Cell) => {
+  if (row.type === 'work') {
+    const label = getWorkLabel(cell)
+    if (!label) return ''
+    const extra = cell.extraInfo?.trim()
+    if (extra) return `${label} • ${extra}`
+    return label
+  }
+  let label = ''
+  if (cell.text.trim()) {
+    label = cell.text
+  } else if (cell.minutes > 0 || cell.distance > 0) {
+    label = row.label
+  } else {
+    return ''
+  }
+  const parts: string[] = []
+  if (cell.minutes > 0) {
+    const formatted = formatMinutes(cell.minutes)
+    if (formatted) parts.push(formatted)
+  }
+  if (isDistanceRow(row) && cell.distance > 0) {
+    parts.push(`${cell.distance} km`)
+  }
+  if (parts.length > 0) {
+    return `${label} • ${parts.join(' • ')}`
+  }
+  return label
+}
+
+const getActivitySignature = (cell: Cell) =>
+  JSON.stringify({
+    text: cell.text,
+    minutes: cell.minutes,
+    distance: cell.distance,
+    workMode: cell.workMode ?? '',
+    workUnsure: cell.workUnsure ?? false,
+    extraInfo: cell.extraInfo ?? '',
+    alternativeTo: cell.alternativeTo ?? '',
+    whenText: cell.whenText ?? '',
+  })
+
 function App() {
   const delayStyle = (value: number): CSSProperties =>
     ({
@@ -344,6 +366,10 @@ function App() {
   } | null>(null)
   const [weekOffset, setWeekOffset] = useState(0)
   const [dragging, setDragging] = useState<{
+    rowIndex: number
+    day: string
+  } | null>(null)
+  const [hoveredCell, setHoveredCell] = useState<{
     rowIndex: number
     day: string
   } | null>(null)
@@ -374,12 +400,22 @@ function App() {
   const [planError, setPlanError] = useState<string | null>(null)
   const saveTimer = useRef<number | null>(null)
   const [lockedDays, setLockedDays] = useState<string[]>([])
+  const [canUndo, setCanUndo] = useState(false)
   const [rowModalIndex, setRowModalIndex] = useState<number | null>(null)
   const [rowDraft, setRowDraft] = useState<{
     label: string
     type: RowType
     tone: Tone
   } | null>(null)
+  const titleInputRef = useRef<HTMLInputElement | null>(null)
+  const historyRef = useRef<Array<{ rows: Row[]; lockedDays: string[] }>>([])
+  const historyIndexRef = useRef(-1)
+  const skipHistoryRef = useRef(false)
+
+  const cloneRows = (value: Row[]) =>
+    typeof structuredClone === 'function'
+      ? structuredClone(value)
+      : JSON.parse(JSON.stringify(value)) as Row[]
 
   const today = new Date()
   const baseDate = new Date(
@@ -572,6 +608,35 @@ function App() {
       })
     )
     closeModal()
+  }
+
+  const deleteCellAt = (rowIndex: number, day: string) => {
+    if (lockedDays.includes(day)) return
+    const row = rows[rowIndex]
+    const cell = row.cells[day]
+    if (isCellEmpty(cell)) return
+    setRows((prev) =>
+      prev.map((item, index) => {
+        if (index !== rowIndex) return item
+        return {
+          ...item,
+          cells: {
+            ...item.cells,
+            [day]: {
+              text: '',
+              minutes: 0,
+              distance: 0,
+              tone: item.tone,
+              workMode: '',
+              workUnsure: false,
+              extraInfo: '',
+              alternativeTo: '',
+              whenText: '',
+            },
+          },
+        }
+      })
+    )
   }
 
   const updateCellAlternativeTo = (
@@ -793,9 +858,7 @@ function App() {
     )
     const count = days.reduce((sum, day) => {
       const cell = row.cells[day]
-      const isEmpty =
-        cell.text.trim() === '' && cell.minutes === 0 && cell.distance === 0
-      return sum + (isEmpty ? 0 : 1)
+      return sum + (isCellEmpty(cell) ? 0 : 1)
     }, 0)
     return { minutes, distance, count }
   })
@@ -803,6 +866,44 @@ function App() {
   const isModalTraining = modalRow?.type === 'training'
   const isModalWork = modalRow?.type === 'work'
   const isModalDistance = modalRow ? isDistanceRow(modalRow) : false
+  const copyOptions =
+    modalRow && modalCell
+      ? (() => {
+          const entries = days
+            .filter((day) => day !== modalCell.day)
+            .map((day) => modalRow.cells[day])
+            .filter((cell) => !isCellEmpty(cell))
+            .map((cell) => ({
+              cell,
+              label: getCopyLabel(modalRow, cell),
+              signature: getActivitySignature(cell),
+            }))
+            .filter((entry) => entry.label.trim() !== '')
+
+          const map = new Map<
+            string,
+            { cell: Cell; label: string; count: number; signature: string }
+          >()
+          entries.forEach((entry) => {
+            const existing = map.get(entry.signature)
+            if (existing) {
+              existing.count += 1
+            } else {
+              map.set(entry.signature, {
+                cell: entry.cell,
+                label: entry.label,
+                count: 1,
+                signature: entry.signature,
+              })
+            }
+          })
+
+          return Array.from(map.values()).sort((a, b) => {
+            if (b.count !== a.count) return b.count - a.count
+            return a.label.localeCompare(b.label, 'nb-NO')
+          })
+        })()
+      : []
   const trainingStartIndex = rows.findIndex((row) => row.type === 'training')
 
   useEffect(() => {
@@ -823,6 +924,126 @@ function App() {
       authListener.subscription.unsubscribe()
     }
   }, [])
+
+  useEffect(() => {
+    if (skipHistoryRef.current) {
+      skipHistoryRef.current = false
+      return
+    }
+    const snapshot = {
+      rows: cloneRows(rows),
+      lockedDays: [...lockedDays],
+    }
+    if (historyIndexRef.current >= 0) {
+      const current = historyRef.current[historyIndexRef.current]
+      if (
+        JSON.stringify(current) === JSON.stringify(snapshot)
+      ) {
+        return
+      }
+    }
+    historyRef.current = historyRef.current.slice(
+      0,
+      historyIndexRef.current + 1
+    )
+    historyRef.current.push(snapshot)
+    historyIndexRef.current = historyRef.current.length - 1
+    setCanUndo(historyIndexRef.current > 0)
+  }, [rows, lockedDays])
+
+  const undo = () => {
+    if (historyIndexRef.current <= 0) return
+    const nextIndex = historyIndexRef.current - 1
+    const snapshot = historyRef.current[nextIndex]
+    if (!snapshot) return
+    skipHistoryRef.current = true
+    setRows(cloneRows(snapshot.rows))
+    setLockedDays([...snapshot.lockedDays])
+    setModalCell(null)
+    setDraft(null)
+    setRowModalIndex(null)
+    setRowDraft(null)
+    historyIndexRef.current = nextIndex
+    setCanUndo(historyIndexRef.current > 0)
+  }
+
+  useEffect(() => {
+    const handleUndo = (event: KeyboardEvent) => {
+      const isMac = navigator.platform.toLowerCase().includes('mac')
+      const metaKey = isMac ? event.metaKey : event.ctrlKey
+      if (!metaKey || event.key.toLowerCase() !== 'z') return
+      const target = event.target as HTMLElement | null
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return
+      }
+      event.preventDefault()
+      undo()
+    }
+    window.addEventListener('keydown', handleUndo)
+    return () => window.removeEventListener('keydown', handleUndo)
+  }, [rows, lockedDays])
+
+  useEffect(() => {
+    if (!hoveredCell) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return
+      if (modalCell || rowModalIndex !== null) return
+      const key = event.key.toLowerCase()
+      if (key !== 'd' && key !== 'e') return
+      event.preventDefault()
+      const { rowIndex, day } = hoveredCell
+      const cell = rows[rowIndex]?.cells[day]
+      if (!cell) return
+      const isEmpty =
+        cell.text.trim() === '' &&
+        cell.minutes === 0 &&
+        cell.distance === 0 &&
+        (cell.workMode ?? '') === '' &&
+        (cell.extraInfo ?? '').trim() === '' &&
+        (cell.whenText ?? '').trim() === ''
+      if (isEmpty) return
+      if (lockedDays.includes(day)) return
+      if (key === 'e') {
+        openModal(rowIndex, day)
+      } else if (key === 'd') {
+        deleteCellAt(rowIndex, day)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [hoveredCell, modalCell, rowModalIndex, rows, lockedDays])
+
+  useEffect(() => {
+    if (!modalCell && rowModalIndex === null) return
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      if (modalCell) {
+        closeModal()
+      }
+      if (rowModalIndex !== null) {
+        closeRowModal()
+      }
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [modalCell, rowModalIndex])
+
+  useEffect(() => {
+    if (!modalCell || isModalWork) return
+    const handle = window.setTimeout(() => {
+      titleInputRef.current?.focus()
+      titleInputRef.current?.select()
+    }, 0)
+    return () => window.clearTimeout(handle)
+  }, [modalCell, isModalWork])
 
   useEffect(() => {
     const fetchPlan = async () => {
@@ -1025,6 +1246,14 @@ function App() {
           <button
             type="button"
             className="week-button"
+            onClick={undo}
+            disabled={!canUndo}
+          >
+            Angre
+          </button>
+          <button
+            type="button"
+            className="week-button"
             onClick={() => setWeekOffset((prev) => prev - 1)}
           >
             Forrige uke
@@ -1131,20 +1360,8 @@ function App() {
                   const isDayLocked = lockedDays.includes(day)
                   const isWorkRow = row.type === 'work'
                   const allowDistance = isDistanceRow(row)
-                  const isEmpty =
-                    cell.text.trim() === '' &&
-                    cell.minutes === 0 &&
-                    cell.distance === 0 &&
-                    (cell.workMode ?? '') === '' &&
-                    (cell.extraInfo ?? '').trim() === ''
-                  const workLabel =
-                    cell.workMode === 'office'
-                      ? 'Kontor'
-                      : cell.workMode === 'home'
-                      ? 'Hjem'
-                      : cell.text
-                  const workTitle =
-                    workLabel && cell.workUnsure ? `${workLabel}?` : workLabel
+                  const isEmpty = isCellEmpty(cell)
+                  const workTitle = getWorkLabel(cell)
                   const extraInfo = cell.extraInfo?.trim()
                   const whenText = cell.whenText?.trim()
                   const alternativeEntries = isTrainingRow
@@ -1176,6 +1393,14 @@ function App() {
                       style={delayStyle(
                         (rowIndex + 1) * days.length + dayIndex + 1
                       )}
+                      onMouseEnter={() => setHoveredCell({ rowIndex, day })}
+                      onMouseLeave={() =>
+                        setHoveredCell((prev) =>
+                          prev?.rowIndex === rowIndex && prev?.day === day
+                            ? null
+                            : prev
+                        )
+                      }
                       draggable={!isEmpty && !isDayLocked}
                       onDragStart={(event) => {
                         if (isEmpty || isDayLocked) return
@@ -1381,9 +1606,10 @@ function App() {
             <h2>Rediger</h2>
             {!isModalWork && (
               <label className="modal-field">
-                <span>Tittel</span>
+                <span>Hva</span>
                 <input
                   type="text"
+                  ref={titleInputRef}
                   value={draft.text}
                   onChange={(event) =>
                     setDraft((prev) =>
@@ -1393,18 +1619,6 @@ function App() {
                 />
               </label>
             )}
-            <label className="modal-field">
-              <span>Når</span>
-              <input
-                type="text"
-                value={draft.whenText}
-                onChange={(event) =>
-                  setDraft((prev) =>
-                    prev ? { ...prev, whenText: event.target.value } : prev
-                  )
-                }
-              />
-            </label>
             {isModalWork && (
               <>
                 <label className="modal-field">
@@ -1544,6 +1758,52 @@ function App() {
                 )}
               </>
             )}
+            <label className="modal-field">
+              <span>Når</span>
+              <input
+                type="text"
+                value={draft.whenText}
+                onChange={(event) =>
+                  setDraft((prev) =>
+                    prev ? { ...prev, whenText: event.target.value } : prev
+                  )
+                }
+              />
+            </label>
+            {copyOptions.length > 0 && (
+              <label className="modal-field">
+                <span>Kopier fra</span>
+                <div className="quick-row">
+                  {copyOptions.map((option) => (
+                    <button
+                      key={option.signature}
+                      type="button"
+                      className="quick-chip"
+                      onClick={() =>
+                        setDraft((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                text: option.cell.text,
+                                minutes: option.cell.minutes,
+                                distance: option.cell.distance,
+                                workMode: option.cell.workMode ?? '',
+                                workUnsure: option.cell.workUnsure ?? false,
+                                extraInfo: option.cell.extraInfo ?? '',
+                                alternativeTo: option.cell.alternativeTo ?? '',
+                                whenText: option.cell.whenText ?? '',
+                              }
+                            : prev
+                        )
+                      }
+                    >
+                      {option.label}
+                      {option.count > 1 ? ` (${option.count})` : ''}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            )}
             {isModalTraining && (
               <label className="modal-field">
                 <span>Alternativ til</span>
@@ -1571,6 +1831,18 @@ function App() {
                 </select>
               </label>
             )}
+            <label className="modal-field">
+              <span>Når</span>
+              <input
+                type="text"
+                value={draft.whenText}
+                onChange={(event) =>
+                  setDraft((prev) =>
+                    prev ? { ...prev, whenText: event.target.value } : prev
+                  )
+                }
+              />
+            </label>
             <div className="modal-actions">
               <button type="button" className="button ghost" onClick={deleteCell}>
                 Slett
