@@ -422,11 +422,20 @@ function App() {
   const historyRef = useRef<Array<{ rows: Row[]; lockedDays: string[] }>>([])
   const historyIndexRef = useRef(-1)
   const skipHistoryRef = useRef(false)
+  const disableHistoryRef = useRef(false)
+  const MAX_HISTORY = 50
 
   const cloneRows = (value: Row[]) =>
-    typeof structuredClone === 'function'
-      ? structuredClone(value)
-      : JSON.parse(JSON.stringify(value)) as Row[]
+    (() => {
+      try {
+        if (typeof structuredClone === 'function') {
+          return structuredClone(value) as Row[]
+        }
+        return JSON.parse(JSON.stringify(value)) as Row[]
+      } catch {
+        return JSON.parse(JSON.stringify(value)) as Row[]
+      }
+    })()
 
   const today = new Date()
   const baseDate = new Date(
@@ -972,32 +981,34 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (disableHistoryRef.current) return
     if (skipHistoryRef.current) {
       skipHistoryRef.current = false
       return
     }
-    const snapshot = {
-      rows: cloneRows(rows),
-      lockedDays: [...lockedDays],
-    }
-    if (historyIndexRef.current >= 0) {
-      const current = historyRef.current[historyIndexRef.current]
-      if (
-        JSON.stringify(current) === JSON.stringify(snapshot)
-      ) {
-        return
+    try {
+      const snapshot = {
+        rows: cloneRows(rows),
+        lockedDays: [...lockedDays],
       }
+      historyRef.current = historyRef.current.slice(
+        0,
+        historyIndexRef.current + 1
+      )
+      historyRef.current.push(snapshot)
+      if (historyRef.current.length > MAX_HISTORY) {
+        historyRef.current.shift()
+      }
+      historyIndexRef.current = historyRef.current.length - 1
+      setCanUndo(historyIndexRef.current > 0)
+    } catch {
+      disableHistoryRef.current = true
+      setCanUndo(false)
     }
-    historyRef.current = historyRef.current.slice(
-      0,
-      historyIndexRef.current + 1
-    )
-    historyRef.current.push(snapshot)
-    historyIndexRef.current = historyRef.current.length - 1
-    setCanUndo(historyIndexRef.current > 0)
   }, [rows, lockedDays])
 
   const undo = () => {
+    if (disableHistoryRef.current) return
     if (historyIndexRef.current <= 0) return
     const nextIndex = historyIndexRef.current - 1
     const snapshot = historyRef.current[nextIndex]
@@ -1341,7 +1352,6 @@ function App() {
                         )
                       }
                     />
-                    <span>Ferdig</span>
                   </label>
                 </div>
               )
