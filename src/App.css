@@ -184,8 +184,8 @@
   align-items: flex-start;
   justify-content: flex-start;
   flex-direction: column;
-  animation: rise 500ms ease both;
-  animation-delay: calc(var(--i, 1) * 25ms);
+  animation: rise 170ms ease both;
+  animation-delay: calc(var(--i, 1) * 8ms);
   position: relative;
 }
 

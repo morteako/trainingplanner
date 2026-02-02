@@ -374,7 +374,12 @@ function App() {
     rowIndex: number
     day: string
   } | null>(null)
+  const [intensityModal, setIntensityModal] = useState<{
+    rowIndex: number
+    day: string
+  } | null>(null)
   const [weekOffset, setWeekOffset] = useState(0)
+  const [dayShift, setDayShift] = useState(0)
   const [dragging, setDragging] = useState<{
     rowIndex: number
     day: string
@@ -419,23 +424,12 @@ function App() {
     tone: Tone
   } | null>(null)
   const titleInputRef = useRef<HTMLInputElement | null>(null)
-  const historyRef = useRef<Array<{ rows: Row[]; lockedDays: string[] }>>([])
+  const historyRef = useRef<string[]>([])
   const historyIndexRef = useRef(-1)
   const skipHistoryRef = useRef(false)
   const disableHistoryRef = useRef(false)
   const MAX_HISTORY = 50
-
-  const cloneRows = (value: Row[]) =>
-    (() => {
-      try {
-        if (typeof structuredClone === 'function') {
-          return structuredClone(value) as Row[]
-        }
-        return JSON.parse(JSON.stringify(value)) as Row[]
-      } catch {
-        return JSON.parse(JSON.stringify(value)) as Row[]
-      }
-    })()
+  const [isIOSChrome, setIsIOSChrome] = useState(false)
 
   const today = new Date()
   const baseDate = new Date(
@@ -447,8 +441,12 @@ function App() {
   const dayIndex = (baseDate.getDay() + 6) % 7
   const baseWeekStart = addDays(baseDate, -dayIndex)
   const currentWeekStart = addDays(baseWeekStart, weekOffset * 7)
-  const weekDates = days.map((day) =>
-    formatDate(addDays(currentWeekStart, weekDayIndex[day]))
+  const displayDays = [
+    ...days.slice(dayShift),
+    ...days.slice(0, dayShift),
+  ]
+  const weekDates = displayDays.map((_day, index) =>
+    formatDate(addDays(currentWeekStart, dayShift + index))
   )
   const weekNumber = getIsoWeekNumber(currentWeekStart)
   const weekStart = currentWeekStart.toISOString().slice(0, 10)
@@ -566,6 +564,17 @@ function App() {
     )
   }
 
+  const setIntensityAt = (
+    rowIndex: number,
+    day: string,
+    intensity: Intensity
+  ) => {
+    const row = rows[rowIndex]
+    if (!row || row.type !== 'training') return
+    updateCellIntensity(rowIndex, day, intensity)
+    setIntensityModal(null)
+  }
+
   const updateCellWhenText = (
     rowIndex: number,
     day: string,
@@ -614,6 +623,10 @@ function App() {
   const closeModal = () => {
     setModalCell(null)
     setDraft(null)
+  }
+
+  const closeIntensityModal = () => {
+    setIntensityModal(null)
   }
 
   const closeRowModal = () => {
@@ -877,24 +890,27 @@ function App() {
     })
   }
 
-  const minutesPerDay = days.map((day) =>
+  const minutesPerDay = displayDays.map((day) =>
     rows.reduce(
       (sum, row) =>
         sum + (row.type === 'training' ? row.cells[day].minutes : 0),
       0
     )
   )
-  const intensitiesPerDay = days.map((day) =>
+  const intensitiesPerDay = displayDays.map((day) =>
     rows.reduce(
       (counts, row) => {
         if (row.type !== 'training') return counts
         const intensity = row.cells[day].intensity ?? ''
-        if (intensity) {
-          counts[intensity] += 1
+        if (intensity && intensity !== '') {
+          counts[intensity as Exclude<Intensity, ''>] += 1
         }
         return counts
       },
-      { hard: 0, medium: 0, rolig: 0 }
+      { hard: 0, medium: 0, rolig: 0 } as Record<
+        Exclude<Intensity, ''>,
+        number
+      >
     )
   )
   const totalMinutes = minutesPerDay.reduce((sum, value) => sum + value, 0)
@@ -962,6 +978,17 @@ function App() {
   const trainingStartIndex = rows.findIndex((row) => row.type === 'training')
 
   useEffect(() => {
+    const ua = navigator.userAgent
+    const isIOS = /iP(hone|ad|od)/.test(ua)
+    const isChrome = /CriOS/.test(ua)
+    if (isIOS && isChrome) {
+      setIsIOSChrome(true)
+      disableHistoryRef.current = true
+      setCanUndo(false)
+    }
+  }, [])
+
+  useEffect(() => {
     const loadSession = async () => {
       const { data } = await supabase.auth.getSession()
       setSession(data.session)
@@ -987,10 +1014,9 @@ function App() {
       return
     }
     try {
-      const snapshot = {
-        rows: cloneRows(rows),
-        lockedDays: [...lockedDays],
-      }
+      const snapshot = JSON.stringify(serializePlan(rows, lockedDays))
+      const last = historyRef.current[historyIndexRef.current]
+      if (snapshot === last) return
       historyRef.current = historyRef.current.slice(
         0,
         historyIndexRef.current + 1
@@ -1014,8 +1040,15 @@ function App() {
     const snapshot = historyRef.current[nextIndex]
     if (!snapshot) return
     skipHistoryRef.current = true
-    setRows(cloneRows(snapshot.rows))
-    setLockedDays([...snapshot.lockedDays])
+    try {
+      const parsed = JSON.parse(snapshot) as PlanPayload
+      setRows(hydrateRows(parsed))
+      setLockedDays(parsed.lockedDays ?? [])
+    } catch {
+      disableHistoryRef.current = true
+      setCanUndo(false)
+      return
+    }
     setModalCell(null)
     setDraft(null)
     setRowModalIndex(null)
@@ -1025,6 +1058,7 @@ function App() {
   }
 
   useEffect(() => {
+    if (isIOSChrome) return
     const handleUndo = (event: KeyboardEvent) => {
       const isMac = navigator.platform.toLowerCase().includes('mac')
       const metaKey = isMac ? event.metaKey : event.ctrlKey
@@ -1044,15 +1078,15 @@ function App() {
     }
     window.addEventListener('keydown', handleUndo)
     return () => window.removeEventListener('keydown', handleUndo)
-  }, [rows, lockedDays])
+  }, [rows, lockedDays, isIOSChrome])
 
   useEffect(() => {
     if (!hoveredCell) return
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return
-      if (modalCell || rowModalIndex !== null) return
+      if (modalCell || rowModalIndex !== null || intensityModal) return
       const key = event.key.toLowerCase()
-      if (key !== 'd' && key !== 'e') return
+      if (key !== 'd' && key !== 'e' && key !== 'i') return
       event.preventDefault()
       const { rowIndex, day } = hoveredCell
       const cell = rows[rowIndex]?.cells[day]
@@ -1065,9 +1099,12 @@ function App() {
         (cell.extraInfo ?? '').trim() === '' &&
         (cell.whenText ?? '').trim() === ''
       if (isEmpty) return
-      if (lockedDays.includes(day)) return
       if (key === 'e') {
         openModal(rowIndex, day)
+      } else if (key === 'i') {
+        const row = rows[rowIndex]
+        if (row?.type !== 'training') return
+        setIntensityModal({ rowIndex, day })
       } else if (key === 'd') {
         deleteCellAt(rowIndex, day)
       }
@@ -1075,10 +1112,31 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [hoveredCell, modalCell, rowModalIndex, rows, lockedDays])
+  }, [hoveredCell, modalCell, rowModalIndex, intensityModal, rows, lockedDays])
 
   useEffect(() => {
-    if (!modalCell && rowModalIndex === null) return
+    if (!intensityModal) return
+    const handleIntensityKeys = (event: KeyboardEvent) => {
+      if (event.repeat) return
+      const key = event.key.toLowerCase()
+      if (key === 'escape') {
+        event.preventDefault()
+        closeIntensityModal()
+        return
+      }
+      if (key !== 'e' && key !== 'm' && key !== 'h') return
+      event.preventDefault()
+      const { rowIndex, day } = intensityModal
+      if (key === 'e') setIntensityAt(rowIndex, day, 'rolig')
+      if (key === 'm') setIntensityAt(rowIndex, day, 'medium')
+      if (key === 'h') setIntensityAt(rowIndex, day, 'hard')
+    }
+    window.addEventListener('keydown', handleIntensityKeys)
+    return () => window.removeEventListener('keydown', handleIntensityKeys)
+  }, [intensityModal, rows])
+
+  useEffect(() => {
+    if (!modalCell && rowModalIndex === null && !intensityModal) return
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -1088,10 +1146,13 @@ function App() {
       if (rowModalIndex !== null) {
         closeRowModal()
       }
+      if (intensityModal) {
+        closeIntensityModal()
+      }
     }
     window.addEventListener('keydown', handleEscape)
     return () => window.removeEventListener('keydown', handleEscape)
-  }, [modalCell, rowModalIndex])
+  }, [modalCell, rowModalIndex, intensityModal])
 
   useEffect(() => {
     if (!modalCell || isModalWork) return
@@ -1303,6 +1364,24 @@ function App() {
           <button
             type="button"
             className="week-button"
+            onClick={() =>
+              setDayShift((prev) => (prev - 1 + days.length) % days.length)
+            }
+          >
+            1 dag tilbake
+          </button>
+          <button
+            type="button"
+            className="week-button"
+            onClick={() =>
+              setDayShift((prev) => (prev + 1) % days.length)
+            }
+          >
+            1 dag frem
+          </button>
+          <button
+            type="button"
+            className="week-button"
             onClick={undo}
             disabled={!canUndo}
           >
@@ -1329,7 +1408,7 @@ function App() {
         <div className="sheet-scroll" aria-label="Ukeplan">
           <div className="grid">
             <div className="cell corner" aria-hidden="true" />
-            {days.map((day, index) => {
+            {displayDays.map((day, index) => {
               const isWeekend = day === 'Lørdag' || day === 'Søndag'
               const isDayLocked = lockedDays.includes(day)
               return (
@@ -1363,14 +1442,21 @@ function App() {
                 ? days.reduce(
                     (counts, day) => {
                       const intensity = row.cells[day].intensity ?? ''
-                      if (intensity) {
-                        counts[intensity] += 1
+                      if (intensity && intensity !== '') {
+                        counts[intensity as Exclude<Intensity, ''>] += 1
                       }
                       return counts
                     },
-                    { hard: 0, medium: 0, rolig: 0 }
+                    { hard: 0, medium: 0, rolig: 0 } as Record<
+                      Exclude<Intensity, ''>,
+                      number
+                    >
                   )
-                : { hard: 0, medium: 0, rolig: 0 }
+                : ({
+                    hard: 0,
+                    medium: 0,
+                    rolig: 0,
+                  } as Record<Exclude<Intensity, ''>, number>)
               return (
               <div key={row.label} className="row">
                 <div
@@ -1443,7 +1529,7 @@ function App() {
                     )}
                   </div>
                 </div>
-                {days.map((day, dayIndex) => {
+                {displayDays.map((day, dayIndex) => {
                   const cell = row.cells[day]
                   const tone = cell.tone
                   const isWeekend = day === 'Lørdag' || day === 'Søndag'
@@ -1654,7 +1740,7 @@ function App() {
               </div>
               {minutesPerDay.map((value, index) => (
                 <div
-                  key={`sum-${days[index]}`}
+                  key={`sum-${displayDays[index]}`}
                   className="cell slot summary-cell"
                   style={delayStyle((rows.length + 2) * days.length + index + 1)}
                 >
@@ -1685,7 +1771,7 @@ function App() {
               >
                 Total
               </div>
-              {days.map((day, index) => (
+              {displayDays.map((day, index) => (
                 <div
                   key={`total-${day}`}
                   className="cell slot total-cell"
@@ -2090,6 +2176,66 @@ function App() {
                 </button>
                 <button type="button" className="button" onClick={saveRowModal}>
                   Lagre
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {intensityModal && (
+        <div className="modal-backdrop" onClick={closeIntensityModal}>
+          <div
+            className="modal"
+            role="dialog"
+            aria-modal="true"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>Intensitet</h2>
+            <div>
+              {(() => {
+                const cell =
+                  rows[intensityModal.rowIndex]?.cells[intensityModal.day]
+                const current = cell?.intensity ?? ''
+                return (
+                  <div className="toggle-group">
+                    {([
+                      { value: '', label: 'Ingen' },
+                      { value: 'rolig', label: 'Rolig' },
+                      { value: 'medium', label: 'Medium' },
+                      { value: 'hard', label: 'Hard' },
+                    ] as Array<{ value: Intensity; label: string }>).map(
+                      (option) => (
+                        <button
+                          key={option.value || 'none'}
+                          type="button"
+                          className={`toggle-button${
+                            current === option.value ? ' active' : ''
+                          }`}
+                          onClick={() =>
+                            setIntensityAt(
+                              intensityModal.rowIndex,
+                              intensityModal.day,
+                              option.value
+                            )
+                          }
+                        >
+                          {option.label}
+                        </button>
+                      )
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+            <div className="modal-actions">
+              <div />
+              <div className="modal-actions-right">
+                <button
+                  type="button"
+                  className="button ghost"
+                  onClick={closeIntensityModal}
+                >
+                  Avbryt
                 </button>
               </div>
             </div>
