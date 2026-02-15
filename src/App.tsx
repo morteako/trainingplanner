@@ -14,16 +14,6 @@ const days = [
   'Søndag',
 ]
 
-const weekDayIndex: Record<string, number> = {
-  Mandag: 0,
-  Tirsdag: 1,
-  Onsdag: 2,
-  Torsdag: 3,
-  Fredag: 4,
-  Lørdag: 5,
-  Søndag: 6,
-}
-
 const addDays = (date: Date, daysToAdd: number) => {
   const next = new Date(date)
   next.setDate(next.getDate() + daysToAdd)
@@ -62,6 +52,9 @@ type Tone =
 type WorkMode = 'office' | 'home' | ''
 
 type Intensity = '' | 'hard' | 'medium' | 'rolig'
+type NonEmptyIntensity = Exclude<Intensity, ''>
+
+const intensityLevels: NonEmptyIntensity[] = ['hard', 'medium', 'rolig']
 
 type Cell = {
   text: string
@@ -902,15 +895,12 @@ function App() {
       (counts, row) => {
         if (row.type !== 'training') return counts
         const intensity = row.cells[day].intensity ?? ''
-        if (intensity && intensity !== '') {
-          counts[intensity as Exclude<Intensity, ''>] += 1
+        if (intensity) {
+          counts[intensity] += 1
         }
         return counts
       },
-      { hard: 0, medium: 0, rolig: 0 } as Record<
-        Exclude<Intensity, ''>,
-        number
-      >
+      { hard: 0, medium: 0, rolig: 0 } as Record<NonEmptyIntensity, number>
     )
   )
   const totalMinutes = minutesPerDay.reduce((sum, value) => sum + value, 0)
@@ -1442,13 +1432,13 @@ function App() {
                 ? days.reduce(
                     (counts, day) => {
                       const intensity = row.cells[day].intensity ?? ''
-                      if (intensity && intensity !== '') {
-                        counts[intensity as Exclude<Intensity, ''>] += 1
+                      if (intensity) {
+                        counts[intensity] += 1
                       }
                       return counts
                     },
                     { hard: 0, medium: 0, rolig: 0 } as Record<
-                      Exclude<Intensity, ''>,
+                      NonEmptyIntensity,
                       number
                     >
                   )
@@ -1456,7 +1446,7 @@ function App() {
                     hard: 0,
                     medium: 0,
                     rolig: 0,
-                  } as Record<Exclude<Intensity, ''>, number>)
+                  } as Record<NonEmptyIntensity, number>)
               return (
               <div key={row.label} className="row">
                 <div
@@ -1511,19 +1501,18 @@ function App() {
                       )}
                     {isTrainingRow && (
                       <div className="intensity-summary">
-                        {(['hard', 'medium', 'rolig'] as Intensity[]).map(
-                          (level) =>
-                            rowIntensityCounts[level] > 0 ? (
-                              <span
-                                key={level}
-                                className={`intensity-dot ${level}`}
-                                aria-label={`${rowIntensityCounts[level]}`}
-                              >
-                                {rowIntensityCounts[level] > 1
-                                  ? rowIntensityCounts[level]
-                                  : ''}
-                              </span>
-                            ) : null
+                        {intensityLevels.map((level) =>
+                          rowIntensityCounts[level] > 0 ? (
+                            <span
+                              key={level}
+                              className={`intensity-dot ${level}`}
+                              aria-label={`${rowIntensityCounts[level]}`}
+                            >
+                              {rowIntensityCounts[level] > 1
+                                ? rowIntensityCounts[level]
+                                : ''}
+                            </span>
+                          ) : null
                         )}
                       </div>
                     )}
@@ -1746,19 +1735,18 @@ function App() {
                 >
                   {formatMinutes(value)}
                   <div className="intensity-summary">
-                    {(['hard', 'medium', 'rolig'] as Intensity[]).map(
-                      (level) =>
-                        intensitiesPerDay[index][level] > 0 ? (
-                          <span
-                            key={level}
-                            className={`intensity-dot ${level}`}
-                            aria-label={`${intensitiesPerDay[index][level]}`}
-                          >
-                            {intensitiesPerDay[index][level] > 1
-                              ? intensitiesPerDay[index][level]
-                              : ''}
-                          </span>
-                        ) : null
+                    {intensityLevels.map((level) =>
+                      intensitiesPerDay[index][level] > 0 ? (
+                        <span
+                          key={level}
+                          className={`intensity-dot ${level}`}
+                          aria-label={`${intensitiesPerDay[index][level]}`}
+                        >
+                          {intensitiesPerDay[index][level] > 1
+                            ? intensitiesPerDay[index][level]
+                            : ''}
+                        </span>
+                      ) : null
                     )}
                   </div>
                 </div>
