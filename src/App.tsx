@@ -363,6 +363,7 @@ function App() {
     }) as CSSProperties
 
   const [rows, setRows] = useState<Row[]>(() => buildInitialRows())
+  const [nextRows, setNextRows] = useState<Row[]>(() => buildInitialRows())
   const [modalCell, setModalCell] = useState<{
     rowIndex: number
     day: string
@@ -403,12 +404,15 @@ function App() {
   const [authNotice, setAuthNotice] = useState<string | null>(null)
   const [authLoading, setAuthLoading] = useState(false)
   const [planLoading, setPlanLoading] = useState(false)
+  const [nextPlanLoading, setNextPlanLoading] = useState(false)
   const [planStatus, setPlanStatus] = useState<
     'idle' | 'saving' | 'saved' | 'error'
   >('idle')
   const [planError, setPlanError] = useState<string | null>(null)
   const saveTimer = useRef<number | null>(null)
+  const nextSaveTimer = useRef<number | null>(null)
   const [lockedDays, setLockedDays] = useState<string[]>([])
+  const [nextLockedDays, setNextLockedDays] = useState<string[]>([])
   const [canUndo, setCanUndo] = useState(false)
   const [rowModalIndex, setRowModalIndex] = useState<number | null>(null)
   const [rowDraft, setRowDraft] = useState<{
@@ -445,9 +449,87 @@ function App() {
   const weekStart = currentWeekStart.toISOString().slice(0, 10)
   const weekYear = currentWeekStart.getFullYear()
   const localPlanKey = `trainingplanner:${weekStart}`
+  const nextWeekStart = addDays(currentWeekStart, 7)
+  const nextWeekNumber = getIsoWeekNumber(nextWeekStart)
+  const nextWeekYear = nextWeekStart.getFullYear()
+  const nextWeekStartKey = nextWeekStart.toISOString().slice(0, 10)
+  const nextLocalPlanKey = `trainingplanner:${nextWeekStartKey}`
+  const nextWeekStartIndex = days.length - dayShift
+  const dayWeekMap = Object.fromEntries(
+    displayDays.map((day, index) => [
+      day,
+      dayShift > 0 && index >= nextWeekStartIndex ? 'next' : 'current',
+    ])
+  ) as Record<string, 'current' | 'next'>
+
+  const getWeekForDay = (day: string) => dayWeekMap[day] ?? 'current'
+  const isNextWeekDay = (day: string) => getWeekForDay(day) === 'next'
+  const getRowsForDay = (day: string) => (isNextWeekDay(day) ? nextRows : rows)
+  const getLockedDaysForDay = (day: string) =>
+    isNextWeekDay(day) ? nextLockedDays : lockedDays
+  const setRowsForDay = (
+    day: string,
+    updater: (prev: Row[]) => Row[]
+  ) => {
+    if (isNextWeekDay(day)) {
+      setNextRows(updater)
+    } else {
+      setRows(updater)
+    }
+  }
+  const setLockedDaysForDay = (
+    day: string,
+    updater: (prev: string[]) => string[]
+  ) => {
+    if (isNextWeekDay(day)) {
+      setNextLockedDays(updater)
+    } else {
+      setLockedDays(updater)
+    }
+  }
+  const buildEmptyCell = (row: Row): Cell => ({
+    text: '',
+    tone: row.tone,
+    minutes: 0,
+    distance: 0,
+    workMode: '',
+    workUnsure: false,
+    extraInfo: '',
+    alternativeTo: '',
+    whenText: '',
+    intensity: '',
+  })
+  const getCellForDay = (rowIndex: number, day: string) => {
+    const activeRows = getRowsForDay(day)
+    const activeRow = activeRows[rowIndex]
+    if (activeRow) return activeRow.cells[day]
+    const templateRow = rows[rowIndex]
+    return templateRow ? buildEmptyCell(templateRow) : null
+  }
+
+  useEffect(() => {
+    if (dayShift === 0) return
+    setNextRows((prev) => {
+      if (prev.length >= rows.length) return prev
+      const next = [...prev]
+      for (let index = prev.length; index < rows.length; index += 1) {
+        const row = rows[index]
+        if (!row) continue
+        next.push({
+          label: row.label,
+          type: row.type,
+          tone: row.tone,
+          cells: Object.fromEntries(
+            days.map((day) => [day, buildEmptyCell(row)])
+          ),
+        })
+      }
+      return next
+    })
+  }, [rows, dayShift])
 
   const updateCellText = (rowIndex: number, day: string, text: string) => {
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((row, index) =>
         index === rowIndex
           ? {
@@ -466,7 +548,7 @@ function App() {
   }
 
   const updateCellMinutes = (rowIndex: number, day: string, minutes: number) => {
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((row, index) =>
         index === rowIndex
           ? {
@@ -489,7 +571,7 @@ function App() {
     day: string,
     distance: number
   ) => {
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((row, index) =>
         index === rowIndex
           ? {
@@ -514,7 +596,7 @@ function App() {
     workUnsure: boolean,
     extraInfo: string
   ) => {
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((row, index) =>
         index === rowIndex
           ? {
@@ -539,7 +621,7 @@ function App() {
     day: string,
     intensity: Intensity
   ) => {
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((row, index) =>
         index === rowIndex
           ? {
@@ -562,7 +644,7 @@ function App() {
     day: string,
     intensity: Intensity
   ) => {
-    const row = rows[rowIndex]
+    const row = getRowsForDay(day)[rowIndex]
     if (!row || row.type !== 'training') return
     updateCellIntensity(rowIndex, day, intensity)
     setIntensityModal(null)
@@ -573,7 +655,7 @@ function App() {
     day: string,
     whenText: string
   ) => {
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((row, index) =>
         index === rowIndex
           ? {
@@ -592,7 +674,8 @@ function App() {
   }
 
   const openModal = (rowIndex: number, day: string) => {
-    const cell = rows[rowIndex].cells[day]
+    const cell = getCellForDay(rowIndex, day)
+    if (!cell) return
     setDraft({
       text: cell.text,
       minutes: cell.minutes,
@@ -629,8 +712,9 @@ function App() {
 
   const deleteCell = () => {
     if (!modalCell) return
-    const row = rows[modalCell.rowIndex]
-    setRows((prev) =>
+    const row = getRowsForDay(modalCell.day)[modalCell.rowIndex]
+    if (!row) return
+    setRowsForDay(modalCell.day, (prev) =>
       prev.map((item, index) => {
         if (index !== modalCell.rowIndex) return item
         return {
@@ -638,16 +722,7 @@ function App() {
           cells: {
             ...item.cells,
             [modalCell.day]: {
-              text: '',
-              minutes: 0,
-              distance: 0,
-              tone: row.tone,
-              workMode: '',
-              workUnsure: false,
-              extraInfo: '',
-              alternativeTo: '',
-              whenText: '',
-              intensity: '',
+              ...buildEmptyCell(row),
             },
           },
         }
@@ -657,10 +732,11 @@ function App() {
   }
 
   const deleteCellAt = (rowIndex: number, day: string) => {
-    const row = rows[rowIndex]
+    const row = getRowsForDay(day)[rowIndex]
+    if (!row) return
     const cell = row.cells[day]
     if (isCellEmpty(cell)) return
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((item, index) => {
         if (index !== rowIndex) return item
         return {
@@ -668,15 +744,7 @@ function App() {
           cells: {
             ...item.cells,
             [day]: {
-              text: '',
-              minutes: 0,
-              distance: 0,
-              tone: item.tone,
-              workMode: '',
-              workUnsure: false,
-              extraInfo: '',
-              alternativeTo: '',
-              whenText: '',
+              ...buildEmptyCell(item),
             },
           },
         }
@@ -689,7 +757,7 @@ function App() {
     day: string,
     alternativeTo: string
   ) => {
-    setRows((prev) =>
+    setRowsForDay(day, (prev) =>
       prev.map((row, index) =>
         index === rowIndex
           ? {
@@ -715,8 +783,10 @@ function App() {
 
   const saveModal = () => {
     if (!modalCell || !draft) return
-    const row = rows[modalCell.rowIndex]
-    const trainingLabels = rows
+    const activeRows = getRowsForDay(modalCell.day)
+    const row = activeRows[modalCell.rowIndex]
+    if (!row) return
+    const trainingLabels = activeRows
       .filter((item) => item.type === 'training')
       .map((item) => item.label)
     const alternativeTo =
@@ -827,9 +897,14 @@ function App() {
     from: { rowIndex: number; day: string },
     to: { rowIndex: number; day: string }
   ) => {
-    if (lockedDays.includes(from.day) || lockedDays.includes(to.day)) return
+    if (
+      getLockedDaysForDay(from.day).includes(from.day) ||
+      getLockedDaysForDay(to.day).includes(to.day)
+    )
+      return
     if (from.rowIndex === to.rowIndex && from.day === to.day) return
-    setRows((prev) => {
+    if (getWeekForDay(from.day) !== getWeekForDay(to.day)) return
+    setRowsForDay(from.day, (prev) => {
       const trainingLabels = prev
         .filter((row) => row.type === 'training')
         .map((row) => row.label)
@@ -846,16 +921,8 @@ function App() {
       const isDistanceTarget =
         targetRow.type === 'training' && isDistanceRow(targetRow)
       next[from.rowIndex].cells[from.day] = {
-        text: '',
-        minutes: 0,
-        distance: 0,
+        ...buildEmptyCell(sourceRow),
         tone: sourceTone,
-        workMode: '',
-        workUnsure: false,
-        extraInfo: '',
-        alternativeTo: '',
-        whenText: '',
-        intensity: '',
       }
       next[to.rowIndex].cells[to.day] = {
         ...fromCell,
@@ -884,46 +951,46 @@ function App() {
   }
 
   const minutesPerDay = displayDays.map((day) =>
-    rows.reduce(
-      (sum, row) =>
-        sum + (row.type === 'training' ? row.cells[day].minutes : 0),
-      0
-    )
+    rows.reduce((sum, row, rowIndex) => {
+      if (row.type !== 'training') return sum
+      const cell = getCellForDay(rowIndex, day)
+      return sum + (cell ? cell.minutes : 0)
+    }, 0)
   )
   const intensitiesPerDay = displayDays.map((day) =>
-    rows.reduce(
-      (counts, row) => {
-        if (row.type !== 'training') return counts
-        const intensity = row.cells[day].intensity ?? ''
-        if (intensity) {
-          counts[intensity] += 1
-        }
-        return counts
-      },
-      { hard: 0, medium: 0, rolig: 0 } as Record<NonEmptyIntensity, number>
-    )
+    rows.reduce((counts, row, rowIndex) => {
+      if (row.type !== 'training') return counts
+      const cell = getCellForDay(rowIndex, day)
+      const intensity = cell?.intensity ?? ''
+      if (intensity) {
+        counts[intensity] += 1
+      }
+      return counts
+    }, { hard: 0, medium: 0, rolig: 0 } as Record<NonEmptyIntensity, number>)
   )
   const totalMinutes = minutesPerDay.reduce((sum, value) => sum + value, 0)
-  const totalsPerRow = rows.map((row) => {
+  const totalsPerRow = rows.map((row, rowIndex) => {
     if (row.type !== 'training') {
       return { minutes: 0, distance: 0, count: 0 }
     }
 
-    const minutes = days.reduce(
-      (sum, day) => sum + row.cells[day].minutes,
-      0
-    )
-    const distance = days.reduce(
-      (sum, day) => sum + (isDistanceRow(row) ? row.cells[day].distance : 0),
-      0
-    )
-    const count = days.reduce((sum, day) => {
-      const cell = row.cells[day]
-      return sum + (isCellEmpty(cell) ? 0 : 1)
+    const minutes = displayDays.reduce((sum, day) => {
+      const cell = getCellForDay(rowIndex, day)
+      return sum + (cell ? cell.minutes : 0)
+    }, 0)
+    const distance = displayDays.reduce((sum, day) => {
+      const cell = getCellForDay(rowIndex, day)
+      return sum + (cell && isDistanceRow(row) ? cell.distance : 0)
+    }, 0)
+    const count = displayDays.reduce((sum, day) => {
+      const cell = getCellForDay(rowIndex, day)
+      return sum + (cell && !isCellEmpty(cell) ? 1 : 0)
     }, 0)
     return { minutes, distance, count }
   })
-  const modalRow = modalCell ? rows[modalCell.rowIndex] : null
+  const modalRow = modalCell
+    ? getRowsForDay(modalCell.day)[modalCell.rowIndex]
+    : null
   const isModalTraining = modalRow?.type === 'training'
   const isModalWork = modalRow?.type === 'work'
   const isModalDistance = modalRow ? isDistanceRow(modalRow) : false
@@ -1004,7 +1071,14 @@ function App() {
       return
     }
     try {
-      const snapshot = JSON.stringify(serializePlan(rows, lockedDays))
+      const snapshot = JSON.stringify(
+        dayShift > 0
+          ? {
+              current: serializePlan(rows, lockedDays),
+              next: serializePlan(nextRows, nextLockedDays),
+            }
+          : serializePlan(rows, lockedDays)
+      )
       const last = historyRef.current[historyIndexRef.current]
       if (snapshot === last) return
       historyRef.current = historyRef.current.slice(
@@ -1021,7 +1095,7 @@ function App() {
       disableHistoryRef.current = true
       setCanUndo(false)
     }
-  }, [rows, lockedDays])
+  }, [rows, lockedDays, nextRows, nextLockedDays, dayShift])
 
   const undo = () => {
     if (disableHistoryRef.current) return
@@ -1031,9 +1105,20 @@ function App() {
     if (!snapshot) return
     skipHistoryRef.current = true
     try {
-      const parsed = JSON.parse(snapshot) as PlanPayload
-      setRows(hydrateRows(parsed))
-      setLockedDays(parsed.lockedDays ?? [])
+      const parsed = JSON.parse(snapshot) as
+        | PlanPayload
+        | { current: PlanPayload; next?: PlanPayload }
+      if ('current' in parsed) {
+        setRows(hydrateRows(parsed.current))
+        setLockedDays(parsed.current.lockedDays ?? [])
+        if (parsed.next) {
+          setNextRows(hydrateRows(parsed.next))
+          setNextLockedDays(parsed.next.lockedDays ?? [])
+        }
+      } else {
+        setRows(hydrateRows(parsed))
+        setLockedDays(parsed.lockedDays ?? [])
+      }
     } catch {
       disableHistoryRef.current = true
       setCanUndo(false)
@@ -1079,7 +1164,7 @@ function App() {
       if (key !== 'd' && key !== 'e' && key !== 'i') return
       event.preventDefault()
       const { rowIndex, day } = hoveredCell
-      const cell = rows[rowIndex]?.cells[day]
+      const cell = getCellForDay(rowIndex, day)
       if (!cell) return
       const isEmpty =
         cell.text.trim() === '' &&
@@ -1092,7 +1177,7 @@ function App() {
       if (key === 'e') {
         openModal(rowIndex, day)
       } else if (key === 'i') {
-        const row = rows[rowIndex]
+        const row = getRowsForDay(day)[rowIndex]
         if (row?.type !== 'training') return
         setIntensityModal({ rowIndex, day })
       } else if (key === 'd') {
@@ -1102,7 +1187,17 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [hoveredCell, modalCell, rowModalIndex, intensityModal, rows, lockedDays])
+  }, [
+    hoveredCell,
+    modalCell,
+    rowModalIndex,
+    intensityModal,
+    rows,
+    lockedDays,
+    nextRows,
+    nextLockedDays,
+    dayShift,
+  ])
 
   useEffect(() => {
     if (!intensityModal) return
@@ -1123,7 +1218,7 @@ function App() {
     }
     window.addEventListener('keydown', handleIntensityKeys)
     return () => window.removeEventListener('keydown', handleIntensityKeys)
-  }, [intensityModal, rows])
+  }, [intensityModal, rows, nextRows, dayShift])
 
   useEffect(() => {
     if (!modalCell && rowModalIndex === null && !intensityModal) return
@@ -1182,6 +1277,33 @@ function App() {
   }, [session?.user, weekStart])
 
   useEffect(() => {
+    if (!session?.user || dayShift === 0) return
+    const fetchNextPlan = async () => {
+      setNextPlanLoading(true)
+      const { data, error } = await supabase
+        .from('plans')
+        .select('data')
+        .eq('user_id', session.user.id)
+        .eq('year', nextWeekYear)
+        .eq('week_number', nextWeekNumber)
+        .maybeSingle()
+      if (!error && data?.data) {
+        const payload = data.data as PlanPayload
+        setNextRows(hydrateRows(payload))
+        setNextLockedDays(payload.lockedDays ?? [])
+      } else if (!error) {
+        setNextRows(buildInitialRows())
+        setNextLockedDays([])
+      } else {
+        setPlanError(error.message)
+      }
+      setNextPlanLoading(false)
+    }
+
+    void fetchNextPlan()
+  }, [session?.user, nextWeekStartKey, dayShift])
+
+  useEffect(() => {
     if (session?.user) return
     const stored = window.localStorage.getItem(localPlanKey)
     if (!stored) {
@@ -1198,6 +1320,24 @@ function App() {
       setLockedDays([])
     }
   }, [session?.user, localPlanKey])
+
+  useEffect(() => {
+    if (session?.user || dayShift === 0) return
+    const stored = window.localStorage.getItem(nextLocalPlanKey)
+    if (!stored) {
+      setNextRows(buildInitialRows())
+      setNextLockedDays([])
+      return
+    }
+    try {
+      const parsed = JSON.parse(stored) as PlanPayload
+      setNextRows(hydrateRows(parsed))
+      setNextLockedDays(parsed.lockedDays ?? [])
+    } catch {
+      setNextRows(buildInitialRows())
+      setNextLockedDays([])
+    }
+  }, [session?.user, nextLocalPlanKey, dayShift])
 
   useEffect(() => {
     if (!session?.user || planLoading) return
@@ -1234,12 +1374,63 @@ function App() {
   }, [rows, lockedDays, session?.user, planLoading, weekStart, weekNumber, weekYear])
 
   useEffect(() => {
+    if (!session?.user || nextPlanLoading || dayShift === 0) return
+    if (nextSaveTimer.current) {
+      window.clearTimeout(nextSaveTimer.current)
+    }
+
+    setPlanStatus('saving')
+    setPlanError(null)
+    nextSaveTimer.current = window.setTimeout(async () => {
+      const { error } = await supabase.from('plans').upsert(
+        {
+          user_id: session.user.id,
+          week_start: nextWeekStartKey,
+          week_number: nextWeekNumber,
+          year: nextWeekYear,
+          data: serializePlan(nextRows, nextLockedDays),
+        },
+        { onConflict: 'user_id,year,week_number' }
+      )
+      if (error) {
+        setPlanStatus('error')
+        setPlanError(error.message)
+      } else {
+        setPlanStatus('saved')
+      }
+    }, 600)
+
+    return () => {
+      if (nextSaveTimer.current) {
+        window.clearTimeout(nextSaveTimer.current)
+      }
+    }
+  }, [
+    nextRows,
+    nextLockedDays,
+    session?.user,
+    nextPlanLoading,
+    nextWeekStartKey,
+    nextWeekNumber,
+    nextWeekYear,
+    dayShift,
+  ])
+
+  useEffect(() => {
     if (session?.user) return
     window.localStorage.setItem(
       localPlanKey,
       JSON.stringify(serializePlan(rows, lockedDays))
     )
   }, [rows, lockedDays, session?.user, localPlanKey])
+
+  useEffect(() => {
+    if (session?.user || dayShift === 0) return
+    window.localStorage.setItem(
+      nextLocalPlanKey,
+      JSON.stringify(serializePlan(nextRows, nextLockedDays))
+    )
+  }, [nextRows, nextLockedDays, session?.user, nextLocalPlanKey, dayShift])
 
   const handleSignIn = async (event: FormEvent) => {
     event.preventDefault()
@@ -1289,7 +1480,6 @@ function App() {
         <div className="top-bar">
           <div>
             <p className="eyebrow">Ukeplan</p>
-            <h1>Treningsplan og avtaler</h1>
           </div>
           <div className="auth">
             {session?.user ? (
@@ -1349,8 +1539,8 @@ function App() {
             {planError && <p className="auth-error">{planError}</p>}
           </div>
         </div>
-        <p className="week-number">Uke {weekNumber}</p>
         <div className="week-controls">
+          <p className="week-number">Uke {weekNumber}</p>
           <button
             type="button"
             className="week-button"
@@ -1400,7 +1590,7 @@ function App() {
             <div className="cell corner" aria-hidden="true" />
             {displayDays.map((day, index) => {
               const isWeekend = day === 'Lørdag' || day === 'Søndag'
-              const isDayLocked = lockedDays.includes(day)
+              const isDayLocked = getLockedDaysForDay(day).includes(day)
               return (
                 <div
                   key={day}
@@ -1414,7 +1604,7 @@ function App() {
                       type="checkbox"
                       checked={isDayLocked}
                       onChange={(event) =>
-                        setLockedDays((prev) =>
+                        setLockedDaysForDay(day, (prev) =>
                           event.target.checked
                             ? Array.from(new Set([...prev, day]))
                             : prev.filter((item) => item !== day)
@@ -1429,9 +1619,10 @@ function App() {
               const isTrainingRow = row.type === 'training'
               const isTrainingStart = rowIndex === trainingStartIndex
               const rowIntensityCounts = isTrainingRow
-                ? days.reduce(
+                ? displayDays.reduce(
                     (counts, day) => {
-                      const intensity = row.cells[day].intensity ?? ''
+                      const cell = getCellForDay(rowIndex, day)
+                      const intensity = cell?.intensity ?? ''
                       if (intensity) {
                         counts[intensity] += 1
                       }
@@ -1519,10 +1710,10 @@ function App() {
                   </div>
                 </div>
                 {displayDays.map((day, dayIndex) => {
-                  const cell = row.cells[day]
+                  const cell = getCellForDay(rowIndex, day) ?? buildEmptyCell(row)
                   const tone = cell.tone
                   const isWeekend = day === 'Lørdag' || day === 'Søndag'
-                  const isDayLocked = lockedDays.includes(day)
+                  const isDayLocked = getLockedDaysForDay(day).includes(day)
                   const isWorkRow = row.type === 'work'
                   const allowDistance = isDistanceRow(row)
                   const isEmpty = isCellEmpty(cell)
@@ -1530,8 +1721,9 @@ function App() {
                   const extraInfo = cell.extraInfo?.trim()
                   const whenText = cell.whenText?.trim()
                   const intensity = cell.intensity ?? ''
+                  const activeRows = getRowsForDay(day)
                   const alternativeEntries = isTrainingRow
-                    ? rows.flatMap((sourceRow, sourceRowIndex) => {
+                    ? activeRows.flatMap((sourceRow, sourceRowIndex) => {
                         if (sourceRow.type !== 'training') return []
                         if (sourceRowIndex === rowIndex) return []
                         const sourceCell = sourceRow.cells[day]
@@ -2049,18 +2241,6 @@ function App() {
                 </div>
               </label>
             )}
-            <label className="modal-field">
-              <span>Når</span>
-              <input
-                type="text"
-                value={draft.whenText}
-                onChange={(event) =>
-                  setDraft((prev) =>
-                    prev ? { ...prev, whenText: event.target.value } : prev
-                  )
-                }
-              />
-            </label>
             <div className="modal-actions">
               <button type="button" className="button ghost" onClick={deleteCell}>
                 Slett
@@ -2181,8 +2361,10 @@ function App() {
             <h2>Intensitet</h2>
             <div>
               {(() => {
-                const cell =
-                  rows[intensityModal.rowIndex]?.cells[intensityModal.day]
+                const cell = getCellForDay(
+                  intensityModal.rowIndex,
+                  intensityModal.day
+                )
                 const current = cell?.intensity ?? ''
                 return (
                   <div className="toggle-group">

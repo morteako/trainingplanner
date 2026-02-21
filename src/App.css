@@ -106,7 +106,7 @@
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.2em;
-  font-size: 0.72rem;
+  font-size: 0.9rem;
   color: var(--muted);
   margin: 0 0 8px;
 }
@@ -120,11 +120,12 @@
 .week-controls {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
 .week-number {
-  margin: 0 0 12px;
+  margin: 0;
   color: var(--muted);
   font-size: 0.95rem;
 }
@@ -167,7 +168,7 @@
   display: grid;
   grid-template-columns: 130px repeat(7, minmax(140px, 1fr));
   grid-auto-rows: minmax(76px, auto);
-  min-width: 980px;
+  min-width: 1110px;
 }
 
 .row {
@@ -675,6 +676,7 @@
   .grid {
     grid-template-columns: 110px repeat(7, minmax(120px, 1fr));
     grid-auto-rows: minmax(70px, auto);
+    min-width: 950px;
   }
 
   .cell {
@@ -694,6 +696,7 @@
   .grid {
     grid-template-columns: 100px repeat(7, minmax(110px, 1fr));
     grid-auto-rows: minmax(68px, auto);
+    min-width: 870px;
   }
 
   .cell {
