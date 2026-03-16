@@ -202,6 +202,65 @@ type PlanPayload = {
   lockedDays?: string[]
 }
 
+type ForecastSymbol =
+  | 'clearsky'
+  | 'fair'
+  | 'partlycloudy'
+  | 'cloudy'
+  | 'rainshowers'
+  | 'rain'
+  | 'heavyrain'
+  | 'sleet'
+  | 'snow'
+  | 'fog'
+  | 'unknown'
+
+type DayWeather = {
+  periods: Array<{
+    key: 'morgen' | 'formiddag' | 'ettermiddag' | 'kveld'
+    shortLabel: string
+    symbol: ForecastSymbol
+    emoji: string
+    temperature: number
+    precipitation: number
+  }>
+}
+
+type ForecastTimeseriesEntry = {
+  time: string
+  data?: {
+    instant?: {
+      details?: {
+        air_temperature?: number
+      }
+    }
+    next_1_hours?: {
+      summary?: {
+        symbol_code?: string
+      }
+      details?: {
+        precipitation_amount?: number
+      }
+    }
+    next_6_hours?: {
+      summary?: {
+        symbol_code?: string
+      }
+    }
+    next_12_hours?: {
+      summary?: {
+        symbol_code?: string
+      }
+    }
+  }
+}
+
+type ForecastResponse = {
+  properties?: {
+    timeseries?: ForecastTimeseriesEntry[]
+  }
+}
+
 const serializePlan = (rows: Row[], lockedDays: string[]): PlanPayload => ({
   rows: rows.map((row) => ({
     label: row.label,
@@ -229,6 +288,160 @@ const serializePlan = (rows: Row[], lockedDays: string[]): PlanPayload => ({
   })),
   lockedDays,
 })
+
+const formatIsoDate = (date: Date) => {
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+const getWeatherLabel = (symbol: string): { tone: ForecastSymbol; label: string } => {
+  const normalized = symbol
+    .replace(/_(day|night|polartwilight)$/, '')
+    .toLowerCase()
+
+  if (normalized.includes('clearsky')) return { tone: 'clearsky', label: 'Klart' }
+  if (normalized.includes('fair')) return { tone: 'fair', label: 'Lettskyet' }
+  if (normalized.includes('partlycloudy')) {
+    return { tone: 'partlycloudy', label: 'Delvis skyet' }
+  }
+  if (normalized.includes('fog')) return { tone: 'fog', label: 'Tåke' }
+  if (normalized.includes('heavyrain')) return { tone: 'heavyrain', label: 'Kraftig regn' }
+  if (normalized.includes('rainshowers')) {
+    return { tone: 'rainshowers', label: 'Regnbyger' }
+  }
+  if (normalized.includes('rain')) return { tone: 'rain', label: 'Regn' }
+  if (normalized.includes('lightsleet') || normalized.includes('heavysleet') || normalized.includes('sleet')) {
+    return { tone: 'sleet', label: 'Sludd' }
+  }
+  if (normalized.includes('lightsnow') || normalized.includes('heavysnow') || normalized.includes('snow')) {
+    return { tone: 'snow', label: 'Snø' }
+  }
+  if (normalized.includes('cloudy')) return { tone: 'cloudy', label: 'Skyet' }
+
+  return { tone: 'unknown', label: 'Varsel mangler' }
+}
+
+const weatherPeriods = [
+  { key: 'morgen', shortLabel: 'M', hour: 6 },
+  { key: 'formiddag', shortLabel: 'F', hour: 11 },
+  { key: 'ettermiddag', shortLabel: 'E', hour: 15 },
+  { key: 'kveld', shortLabel: 'K', hour: 20 },
+] as const
+
+const getWeatherEmoji = (symbol: ForecastSymbol) => {
+  switch (symbol) {
+    case 'clearsky':
+      return '☀️'
+    case 'fair':
+      return '🌤️'
+    case 'partlycloudy':
+      return '⛅'
+    case 'cloudy':
+      return '☁️'
+    case 'rainshowers':
+      return '🌦️'
+    case 'rain':
+      return '🌧️'
+    case 'heavyrain':
+      return '⛈️'
+    case 'sleet':
+      return '🌨️'
+    case 'snow':
+      return '❄️'
+    case 'fog':
+      return '🌫️'
+    default:
+      return '•'
+  }
+}
+
+const summarizeForecast = (
+  timeseries: ForecastTimeseriesEntry[] | undefined,
+  dateKeys: string[]
+) => {
+  const grouped = new Map<
+    string,
+    ForecastTimeseriesEntry[]
+  >()
+
+  dateKeys.forEach((dateKey) => {
+    grouped.set(dateKey, [])
+  })
+
+  ;(timeseries ?? []).forEach((entry) => {
+    const timestamp = new Date(entry.time)
+    const dateKey = formatIsoDate(timestamp)
+    const day = grouped.get(dateKey)
+    if (!day) return
+    day.push(entry)
+  })
+
+  return Object.fromEntries(
+    dateKeys.map((dateKey) => {
+      const entries = grouped.get(dateKey)
+      if (!entries || entries.length === 0) {
+        return [dateKey, null]
+      }
+
+      const periods = weatherPeriods.flatMap((period) => {
+        const chosenEntry = entries.reduce<ForecastTimeseriesEntry | null>(
+          (closest, entry) => {
+            const entryDate = new Date(entry.time)
+            const hour = entryDate.getHours() + entryDate.getMinutes() / 60
+            if (hour < period.hour - 2 || hour > period.hour + 2) {
+              return closest
+            }
+            if (!closest) return entry
+            const closestDate = new Date(closest.time)
+            const closestHour =
+              closestDate.getHours() + closestDate.getMinutes() / 60
+            return Math.abs(hour - period.hour) < Math.abs(closestHour - period.hour)
+              ? entry
+              : closest
+          },
+          null
+        )
+
+        if (!chosenEntry) return []
+
+        const symbol =
+          chosenEntry.data?.next_1_hours?.summary?.symbol_code ??
+          chosenEntry.data?.next_6_hours?.summary?.symbol_code ??
+          chosenEntry.data?.next_12_hours?.summary?.symbol_code ??
+          ''
+        const { tone } = getWeatherLabel(symbol)
+        const temperature = chosenEntry.data?.instant?.details?.air_temperature
+        if (typeof temperature !== 'number') return []
+        const precipitation =
+          chosenEntry.data?.next_1_hours?.details?.precipitation_amount ?? 0
+
+        return [
+          {
+            key: period.key,
+            shortLabel: period.shortLabel,
+            symbol: tone,
+            emoji: getWeatherEmoji(tone),
+            temperature: Math.round(temperature),
+            precipitation: Math.round(precipitation * 10) / 10,
+          },
+        ]
+      })
+
+      if (periods.length === 0) {
+        return [dateKey, null]
+      }
+
+      return [
+        dateKey,
+        {
+          periods,
+        } satisfies DayWeather,
+      ]
+    })
+  ) as Record<string, DayWeather | null>
+}
 
 const hydrateRows = (payload: PlanPayload | null | undefined): Row[] => {
   if (!payload?.rows?.length) return buildInitialRows()
@@ -427,6 +640,9 @@ function App() {
   const disableHistoryRef = useRef(false)
   const MAX_HISTORY = 50
   const [isIOSChrome, setIsIOSChrome] = useState(false)
+  const [weatherByDate, setWeatherByDate] = useState<Record<string, DayWeather | null>>({})
+  const [weatherLoading, setWeatherLoading] = useState(false)
+  const [weatherError, setWeatherError] = useState<string | null>(null)
 
   const today = new Date()
   const baseDate = new Date(
@@ -445,6 +661,10 @@ function App() {
   const weekDates = displayDays.map((_day, index) =>
     formatDate(addDays(currentWeekStart, dayShift + index))
   )
+  const displayDateObjects = displayDays.map((_day, index) =>
+    addDays(currentWeekStart, dayShift + index)
+  )
+  const displayDateKeys = displayDateObjects.map((date) => formatIsoDate(date))
   const weekNumber = getIsoWeekNumber(currentWeekStart)
   const weekStart = currentWeekStart.toISOString().slice(0, 10)
   const weekYear = currentWeekStart.getFullYear()
@@ -1035,6 +1255,54 @@ function App() {
   const trainingStartIndex = rows.findIndex((row) => row.type === 'training')
 
   useEffect(() => {
+    const controller = new AbortController()
+
+    const loadWeather = async () => {
+      setWeatherLoading(true)
+      setWeatherError(null)
+
+      try {
+        const response = await fetch(
+          'https://api.met.no/weatherapi/locationforecast/2.0/compact?lat=59.9139&lon=10.7522',
+          {
+            headers: {
+              Accept: 'application/json',
+            },
+            signal: controller.signal,
+          }
+        )
+
+        if (!response.ok) {
+          throw new Error(`Forecast request failed with ${response.status}`)
+        }
+
+        const data = (await response.json()) as ForecastResponse
+        const summary = summarizeForecast(
+          data.properties?.timeseries,
+          displayDateKeys
+        )
+        setWeatherByDate(summary)
+      } catch (error) {
+        if (controller.signal.aborted) return
+        setWeatherError('Kunne ikke laste vær')
+        setWeatherByDate(
+          Object.fromEntries(displayDateKeys.map((dateKey) => [dateKey, null]))
+        )
+      } finally {
+        if (!controller.signal.aborted) {
+          setWeatherLoading(false)
+        }
+      }
+    }
+
+    void loadWeather()
+
+    return () => {
+      controller.abort()
+    }
+  }, [displayDateKeys.join(',')])
+
+  useEffect(() => {
     const ua = navigator.userAgent
     const isIOS = /iP(hone|ad|od)/.test(ua)
     const isChrome = /CriOS/.test(ua)
@@ -1591,6 +1859,7 @@ function App() {
             {displayDays.map((day, index) => {
               const isWeekend = day === 'Lørdag' || day === 'Søndag'
               const isDayLocked = getLockedDaysForDay(day).includes(day)
+              const weather = weatherByDate[displayDateKeys[index]]
               return (
                 <div
                   key={day}
@@ -1599,6 +1868,34 @@ function App() {
                 >
                   <span>{day}</span>
                   <span className="date">{weekDates[index]}</span>
+                  <div className="weather-summary" aria-live="polite">
+                    {weather ? (
+                      weather.periods.map((period) => (
+                        <div key={period.key} className="weather-period">
+                          <span
+                            className={`weather-badge ${period.symbol}`}
+                            aria-label={`${period.key} ${period.symbol}`}
+                          >
+                            {period.shortLabel} {period.emoji}
+                          </span>
+                          <span className="weather-meta">
+                            {period.temperature}°
+                            {period.precipitation > 0
+                              ? ` ${period.precipitation.toFixed(1)} mm`
+                              : ''}
+                          </span>
+                        </div>
+                      ))
+                    ) : weatherLoading ? (
+                      <span className="weather-meta">Laster vær...</span>
+                    ) : weatherError ? (
+                      <span className="weather-meta weather-error">
+                        {weatherError}
+                      </span>
+                    ) : (
+                      <span className="weather-meta">Ingen værdata</span>
+                    )}
+                  </div>
                   <label className="day-lock">
                     <input
                       type="checkbox"
