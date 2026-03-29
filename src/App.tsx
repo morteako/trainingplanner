@@ -70,6 +70,7 @@ type Cell = {
 }
 
 type RowType = 'training' | 'info' | 'work'
+type ViewMode = 'grid' | 'timeline'
 
 type Row = {
   label: string
@@ -556,6 +557,56 @@ const getCopyLabel = (row: Row, cell: Cell) => {
   return label
 }
 
+const getPrimaryCellLabel = (row: Row, cell: Cell) => {
+  if (row.type === 'work') {
+    return getWorkLabel(cell) || row.label
+  }
+
+  const text = cell.text.trim()
+  if (text) return text
+  if (cell.minutes > 0 || cell.distance > 0) return row.label
+  return row.label
+}
+
+const getIntensityLabel = (intensity: Intensity) => {
+  if (intensity === 'hard') return 'Hard'
+  if (intensity === 'medium') return 'Medium'
+  if (intensity === 'rolig') return 'Rolig'
+  return ''
+}
+
+const getCalendarMeta = (row: Row, cell: Cell) => {
+  const details: string[] = []
+  const extraInfo = cell.extraInfo?.trim()
+  const whenText = cell.whenText?.trim()
+  const intensity = getIntensityLabel(cell.intensity ?? '')
+
+  if (row.type === 'training') {
+    const duration = formatMinutes(cell.minutes)
+    if (duration) details.push(duration)
+    if (isDistanceRow(row) && cell.distance > 0) {
+      details.push(`${cell.distance} km`)
+    }
+    if (intensity) details.push(intensity)
+  }
+
+  if (extraInfo) details.push(extraInfo)
+
+  return {
+    whenText,
+    details,
+  }
+}
+
+const getWhenSortKey = (whenText: string) => {
+  const match = whenText.match(/\b([01]?\d|2[0-3])(?:[:.]?([0-5]\d))?\b/)
+  if (!match) return Number.POSITIVE_INFINITY
+
+  const hours = Number(match[1])
+  const minutes = Number(match[2] ?? '0')
+  return hours * 60 + minutes
+}
+
 const getActivitySignature = (cell: Cell) =>
   JSON.stringify({
     text: cell.text,
@@ -643,6 +694,7 @@ function App() {
   const [weatherByDate, setWeatherByDate] = useState<Record<string, DayWeather | null>>({})
   const [weatherLoading, setWeatherLoading] = useState(false)
   const [weatherError, setWeatherError] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>('grid')
 
   const today = new Date()
   const baseDate = new Date(
@@ -1253,6 +1305,44 @@ function App() {
         })()
       : []
   const trainingStartIndex = rows.findIndex((row) => row.type === 'training')
+  const timelineDays = displayDays.map((day, index) => {
+    const activeRows = getRowsForDay(day)
+    const items = activeRows
+      .map((row, rowIndex) => {
+        const cell = row.cells[day]
+        if (isCellEmpty(cell)) return null
+
+        const { whenText, details } = getCalendarMeta(row, cell)
+
+        return {
+          id: `${day}-${rowIndex}`,
+          rowIndex,
+          day,
+          tone: row.tone,
+          title: getPrimaryCellLabel(row, cell),
+          rowLabel: row.label,
+          whenText,
+          details,
+          sortKey: getWhenSortKey(whenText ?? ''),
+          isLocked: getLockedDaysForDay(day).includes(day),
+        }
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null)
+      .sort((a, b) => {
+        if (a.sortKey !== b.sortKey) return a.sortKey - b.sortKey
+        return a.title.localeCompare(b.title, 'nb-NO')
+      })
+
+    return {
+      day,
+      date: weekDates[index],
+      dateKey: displayDateKeys[index],
+      weather: weatherByDate[displayDateKeys[index]],
+      isWeekend: day === 'Lørdag' || day === 'Søndag',
+      isLocked: getLockedDaysForDay(day).includes(day),
+      items,
+    }
+  })
 
   useEffect(() => {
     const controller = new AbortController()
@@ -1809,6 +1899,24 @@ function App() {
         </div>
         <div className="week-controls">
           <p className="week-number">Uke {weekNumber}</p>
+          <div className="view-switch" role="tablist" aria-label="Visning">
+            <button
+              type="button"
+              className={`week-button${viewMode === 'grid' ? ' active-view' : ''}`}
+              onClick={() => setViewMode('grid')}
+              aria-pressed={viewMode === 'grid'}
+            >
+              Rutenett
+            </button>
+            <button
+              type="button"
+              className={`week-button${viewMode === 'timeline' ? ' active-view' : ''}`}
+              onClick={() => setViewMode('timeline')}
+              aria-pressed={viewMode === 'timeline'}
+            >
+              Tid
+            </button>
+          </div>
           <button
             type="button"
             className="week-button"
@@ -1853,6 +1961,7 @@ function App() {
       </header>
 
       <section className="sheet">
+        {viewMode === 'grid' ? (
         <div className="sheet-scroll" aria-label="Ukeplan">
           <div className="grid">
             <div className="cell corner" aria-hidden="true" />
@@ -2262,6 +2371,64 @@ function App() {
             </div>
           </div>
         </div>
+        ) : (
+          <div className="sheet-scroll" aria-label="Tidsbasert ukeplan">
+            <div className="calendar-view">
+              {timelineDays.map((day) => (
+                <section
+                  key={day.dateKey}
+                  className={`calendar-day${day.isWeekend ? ' weekend' : ''}`}
+                >
+                  <header className="calendar-day-header">
+                    <div>
+                      <p className="calendar-day-name">{day.day}</p>
+                      <p className="calendar-day-date">{day.date}</p>
+                    </div>
+                    {day.isLocked && <span className="calendar-day-lock">Låst</span>}
+                  </header>
+                  <div className="calendar-weather">
+                    {day.weather ? (
+                      day.weather.periods.map((period) => (
+                        <span key={period.key} className="calendar-weather-item">
+                          {period.shortLabel} {period.emoji} {period.temperature}°
+                        </span>
+                      ))
+                    ) : weatherLoading ? (
+                      <span className="calendar-weather-item">Laster vær...</span>
+                    ) : null}
+                  </div>
+                  <div className="calendar-items">
+                    {day.items.length > 0 ? (
+                      day.items.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          className={`calendar-item ${item.tone}`}
+                          onClick={() => openModal(item.rowIndex, item.day)}
+                        >
+                          <div className="calendar-item-top">
+                            <span className="calendar-item-time">
+                              {item.whenText || 'Uten tid'}
+                            </span>
+                            <span className="calendar-item-row">{item.rowLabel}</span>
+                          </div>
+                          <span className="calendar-item-title">{item.title}</span>
+                          {item.details.length > 0 && (
+                            <span className="calendar-item-meta">
+                              {item.details.join(' • ')}
+                            </span>
+                          )}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="calendar-empty">Ingen planer</div>
+                    )}
+                  </div>
+                </section>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
       {modalCell && draft && (
         <div className="modal-backdrop" onClick={closeModal}>
